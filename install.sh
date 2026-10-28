@@ -1,30 +1,44 @@
-#!/bin/sh
-# OpenATV 8 - community installer for Dreambox One and other supported devices.
-# EXPERIMENTAL: third-party installers may restart Enigma2, ask for input, or fail.
-# Intended for newly flashed images. Do not run on a configured receiver without review.
-# GSH2 is deliberately excluded.
-# Version: 0.1.0
+ #!/bin/sh
+# OpenATV 8 Auto Setup
+# Version: 0.1.1
+# Dreambox One + Other OpenATV Devices
+# GSH2 is installed separately.
+
 LOG=/home/root/openatv-install.log
 FAILED=""
 N=0
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-note() { printf '\n%s\n' "$*"; }
+note() {
+    printf '\n%s\n' "$*"
+}
+
 step() {
     N=$((N+1))
     note "[$N] START: $1"
-    LABEL=$1; shift
+    LABEL=$1
+    shift
+
     "$@"
     RC=$?
-    if [ "$RC" -eq 0 ]; then note "[$N] OK: $LABEL";
-    else note "[$N] FAILED ($RC): $LABEL"; FAILED="$FAILED | $LABEL"; fi
+
+    if [ "$RC" -eq 0 ]; then
+        note "[$N] OK: $LABEL"
+    else
+        note "[$N] FAILED ($RC): $LABEL"
+        FAILED="$FAILED | $LABEL"
+    fi
     return 0
 }
+
 remote() {
-    LABEL=$1; URL=$2
-    note "--- Download: $LABEL"
+    LABEL=$1
+    URL=$2
     TMPFILE="/tmp/openatv-stage-$$.sh"
+
     rm -f "$TMPFILE"
+    note "--- Download: $LABEL"
+
     if wget --no-check-certificate -q -O "$TMPFILE" "$URL" && [ -s "$TMPFILE" ]; then
         bash "$TMPFILE"
         RC=$?
@@ -32,81 +46,138 @@ remote() {
         note "Download failed: $URL"
         RC=1
     fi
+
     rm -f "$TMPFILE"
     return "$RC"
 }
-softcams() {
-    rm -f /tmp/feed
-    if ! wget --no-check-certificate -q -O /tmp/feed https://raw.githubusercontent.com/SusanOV/softcamfeed/main/oea/feed || [ ! -s /tmp/feed ]; then
-        note 'Softcam feed download failed'
+
+install_ncam_release() {
+    remote 'NCam stable' 'https://raw.githubusercontent.com/biko-73/Ncam_EMU/main/installer.sh' || return 1
+
+    INSTALLED=$(opkg list-installed | grep -E '^enigma2-plugin-softcams-ncam[[:space:]]+-' | head -n 1)
+
+    if [ -z "$INSTALLED" ]; then
+        note "NCam package missing after installer"
         return 1
     fi
-    bash -n /tmp/feed || return 1
-    bash /tmp/feed || return 1
-    opkg update || return 1
-    LIST=/tmp/openatv-cams-$$.list
-    opkg list > "$LIST" || { rm -f "$LIST"; return 1; }
-    NCAM=$(awk '$1=="enigma2-plugin-softcams-ncam" || $1=="enigma2-softcams-ncam" || $1=="ncam" {print $1; exit}' "$LIST")
-    OSCAM=$(awk '$1=="enigma2-plugin-softcams-oscam-master" || $1=="oscam-master" {print $1; exit}' "$LIST")
-    rm -f "$LIST"
-    CAM_RC=0
-    if [ -n "$NCAM" ]; then
-        note "NCam package: $NCAM"
-        opkg install "$NCAM" || CAM_RC=1
-    else
-        note 'NCam not found in the compatible feed; skipped'
-        CAM_RC=1
-    fi
-    if [ -n "$OSCAM" ]; then
-        note "OSCam package: $OSCAM"
-        opkg install "$OSCAM" || CAM_RC=1
-    else
-        note 'OSCam Master not found in the compatible feed; skipped'
-        CAM_RC=1
-    fi
-    return "$CAM_RC"
+
+    note "NCam installed: $INSTALLED"
+
+    case "$INSTALLED" in
+        *15.8*) return 0 ;;
+        *)
+            note "WARNING: NCam is not 15.8"
+            return 1
+            ;;
+    esac
 }
 
-note '=== OpenATV 8 automatic plugins installer ==='
+install_levi45() {
+    remote 'OSCam Levi45' 'https://raw.githubusercontent.com/levi-45/Levi45Emulator/main/installer.sh' || return 1
+
+    INSTALLED=$(opkg list-installed | grep -E '^enigma2-plugin-softcams-oscam-emu-pcsc-levi45[[:space:]]+-' | head -n 1)
+
+    if [ -z "$INSTALLED" ]; then
+        note "OSCam Levi45 package missing after installer"
+        return 1
+    fi
+
+    note "OSCam Levi45 installed: $INSTALLED"
+}
+
+note "=== OpenATV Auto Setup v0.1.1 ==="
+
 if [ "$(id -u)" -ne 0 ] || ! command -v opkg >/dev/null 2>&1; then
-    note 'ERROR: run as root on an opkg-based OpenATV image'
+    note "ERROR: OpenATV with opkg required"
     exit 1
 fi
+
 if ! command -v bash >/dev/null 2>&1; then
-    note 'Installing required bash shell'
     opkg update || exit 1
     opkg install bash || exit 1
 fi
-MODEL=$(cat /proc/stb/info/model 2>/dev/null)
-note "Model: ${MODEL:-unknown} | Architecture: $(uname -m)"
-if [ "$MODEL" = one ] || [ "$MODEL" = dreamone ] || [ "$MODEL" = dreamboxone ]; then note 'Profile: OpenATV Dreambox One'; else note 'Profile: OpenATV Other Devices'; fi
 
-step 'opkg update' opkg update
-step 'AJ Panel' remote 'AJ Panel' 'https://raw.githubusercontent.com/biko-73/AjPanel/main/installer.sh'
-step 'SubsSupport Pro' remote 'SubsSupport Pro' 'https://raw.githubusercontent.com/popking159/SubsSupportPro/refs/heads/main/myinstaller.sh'
-step 'Transmission Clients' opkg install transmission transmission-client python3-transmission-rpc xz
-step 'Transmission optional libraries' opkg install python3-beautifulsoup4 python3-yt-dlp
-step 'Transmission E2' remote 'Transmission E2' 'http://dreambox4u.com/dreamarabia/Transmission_e2/Transmission_e2.sh'
-step 'TMDB' remote 'TMDB' 'https://raw.githubusercontent.com/biko-73/TMBD/main/installer.sh'
-step 'Arabic Savior' remote 'Arabic Savior' 'https://raw.githubusercontent.com/fairbird/ArabicSavior/main/installer.sh'
-step 'Raed Quick Signal' remote 'Raed Quick Signal' 'https://raw.githubusercontent.com/fairbird/RaedQuickSignal/main/installer.sh'
-if [ "$MODEL" = one ] || [ "$MODEL" = dreamone ] || [ "$MODEL" = dreamboxone ]; then
-    step 'AudioShift (Dreambox One only)' remote 'AudioShift' 'https://xfayez95.github.io/audioshift/installer.sh'
+MODEL=$(cat /proc/stb/info/model 2>/dev/null)
+
+note "Model: ${MODEL:-unknown}"
+note "Architecture: $(uname -m)"
+
+if [ "$MODEL" = "one" ] || [ "$MODEL" = "dreamone" ] || [ "$MODEL" = "dreamboxone" ]; then
+    note "Profile: OpenATV Dreambox One"
+else
+    note "Profile: OpenATV Other Devices"
 fi
-step 'IPAudio Pro' remote 'IPAudio Pro' 'https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh'
-step 'Custom Channel Selection' remote 'Custom Channel Selection' 'https://raw.githubusercontent.com/popking159/customchannelselection/refs/heads/main/myinstaller.sh'
-step 'Aglare Skin' remote 'Aglare Skin' 'https://raw.githubusercontent.com/popking159/skins/refs/heads/main/aglareatv/installer.sh'
-step 'LiveFeed OE' remote 'LiveFeed OE' 'https://live-feed.net/enigma2/installer.sh'
-step 'Softcam feed + NCam + OSCam' softcams
-step 'MixAudio (last)' remote 'MixAudio' 'https://raw.githubusercontent.com/Najar1991/MixAudio_All/refs/heads/main/install.sh'
-note '=== INSTALLATION FINISHED ==='
-if [ -n "$FAILED" ]; then note "Check failed steps:$FAILED"; else note 'All steps reported success'; fi
+
+# 1. Package Update
+step "opkg update" opkg update
+
+# 2. AJ Panel
+step "AJ Panel" remote "AJ Panel" "https://raw.githubusercontent.com/biko-73/AjPanel/main/installer.sh"
+
+# 3. SubsSupport Pro
+step "SubsSupport Pro" remote "SubsSupport Pro" "https://raw.githubusercontent.com/popking159/SubsSupportPro/refs/heads/main/myinstaller.sh"
+
+# 4. Transmission Clients
+step "Transmission Clients" opkg install transmission transmission-client python3-transmission-rpc xz
+
+# 5. Transmission Libraries
+step "Transmission Libraries" opkg install python3-beautifulsoup4 python3-yt-dlp
+
+# 6. Transmission E2
+step "Transmission E2" remote "Transmission E2" "http://dreambox4u.com/dreamarabia/Transmission_e2/Transmission_e2.sh"
+
+# 7. TMDB
+step "TMDB" remote "TMDB" "https://raw.githubusercontent.com/biko-73/TMBD/main/installer.sh"
+
+# 8. Arabic Savior
+step "Arabic Savior" remote "Arabic Savior" "https://raw.githubusercontent.com/fairbird/ArabicSavior/main/installer.sh"
+
+# 9. Raed Quick Signal
+step "Raed Quick Signal" remote "Raed Quick Signal" "https://raw.githubusercontent.com/fairbird/RaedQuickSignal/main/installer.sh"
+
+# 10. AudioShift - Dreambox One ONLY
+if [ "$MODEL" = "one" ] || [ "$MODEL" = "dreamone" ] || [ "$MODEL" = "dreamboxone" ]; then
+    step "AudioShift" remote "AudioShift" "https://xfayez95.github.io/audioshift/installer.sh"
+fi
+
+# 11. IPAudio Pro
+step "IPAudio Pro" remote "IPAudio Pro" "https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh"
+
+# 12. Custom Channel Selection
+step "Custom Channel Selection" remote "Custom Channel Selection" "https://raw.githubusercontent.com/popking159/customchannelselection/refs/heads/main/myinstaller.sh"
+
+# 13. Aglare Skin
+step "Aglare Skin" remote "Aglare Skin" "https://raw.githubusercontent.com/popking159/skins/refs/heads/main/aglareatv/installer.sh"
+
+# 14. LiveFeed OE
+step "LiveFeed OE" remote "LiveFeed OE" "https://live-feed.net/enigma2/installer.sh"
+
+# 15. NCam 15.8
+step "NCam 15.8" install_ncam_release
+
+# 16. OSCam Levi45
+step "OSCam Levi45" install_levi45
+
+# 17. MixAudio LAST
+step "MixAudio LAST" remote "MixAudio" "https://raw.githubusercontent.com/Najar1991/MixAudio_All/refs/heads/main/install.sh"
+
+# Installation Report
+note "=== INSTALLATION FINISHED ==="
+
+if [ -n "$FAILED" ]; then
+    note "FAILED STEPS: $FAILED"
+else
+    note "All steps reported success"
+fi
+
 note "Full log: $LOG"
-note 'GSH2 was NOT installed; install it separately after setup.'
-note 'Full system reboot will start in 5 seconds.'
+note "GSH2 NOT installed"
+note "Full system reboot in 5 seconds"
+
 sync
 sleep 5
 reboot
+
 RC=$?
-note "ERROR: reboot command returned $RC. Please reboot manually."
+note "ERROR: reboot returned $RC"
 exit "$RC"
