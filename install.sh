@@ -1,385 +1,149 @@
 #!/bin/sh
-# H. Hawwas Auto Installer v0.2.2 - Interactive selector (EXPERIMENTAL)
-# OpenATV with opkg ONLY. GSH2 is excluded.
-# Third-party installers may restart Enigma2.
+# H. Hawwas Auto Installer v0.3.0 - TV Edition
+# OpenATV / opkg only
+# GSH2 is deliberately excluded.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-SELF=$0
+CORE=/home/root/hhawwas-core.sh
+PLUG=/usr/lib/enigma2/python/Plugins/Extensions/HawwasInstaller
+CHOICES=/tmp/hhawwas-choices.txt
+PROG=/home/root/openatv-progress.log
 LOG=/home/root/openatv-install.log
-PROGRESS=/home/root/openatv-progress.log
-SELECTION=/tmp/openatv-selection.txt
-PIDFILE=/tmp/openatv-setup.pid
 
-NAME_1='AJ Panel'
-NAME_2='SubsSupport Pro'
-NAME_3='Transmission packages'
-NAME_4='Transmission E2'
-NAME_5='TMDB'
-NAME_6='Arabic Savior'
-NAME_7='Raed Quick Signal'
-NAME_8='AudioShift (Dreambox One only)'
-NAME_9='IPAudio Pro'
-NAME_10='Custom Channel Selection'
-NAME_11='Aglare Skin'
-NAME_12='LiveFeed OE'
-NAME_13='EPG Grabber'
-NAME_14='XStreamity (OpenATV feed)'
-NAME_15='MixAudio'
-NAME_16='NCam 15.8'
-NAME_17='OSCam Levi45 11968 (experimental)'
-
-MAX=17
-
-model() {
-    cat /proc/stb/info/model 2>/dev/null || :
-}
-
-MODEL=$(model)
-
-case "$MODEL" in
-    one|dreamone|dreamboxone)
-        DREAMONE=1
-        ;;
-    *)
-        DREAMONE=0
-        ;;
-esac
-
-name_of() {
-    case "$1" in
-        1) echo "$NAME_1" ;;
-        2) echo "$NAME_2" ;;
-        3) echo "$NAME_3" ;;
-        4) echo "$NAME_4" ;;
-        5) echo "$NAME_5" ;;
-        6) echo "$NAME_6" ;;
-        7) echo "$NAME_7" ;;
-        8) echo "$NAME_8" ;;
-        9) echo "$NAME_9" ;;
-        10) echo "$NAME_10" ;;
-        11) echo "$NAME_11" ;;
-        12) echo "$NAME_12" ;;
-        13) echo "$NAME_13" ;;
-        14) echo "$NAME_14" ;;
-        15) echo "$NAME_15" ;;
-        16) echo "$NAME_16" ;;
-        17) echo "$NAME_17" ;;
-    esac
-}
-
-selected() {
-    case " $SELECTED " in
-        *" $1 "*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-add_choice() {
-    if ! selected "$1"; then
-        SELECTED="$SELECTED $1"
-    fi
-}
-
-remove_choice() {
-    NEW=''
-    for K in $SELECTED; do
-        [ "$K" = "$1" ] || NEW="$NEW $K"
-    done
-    SELECTED=$NEW
-}
-
-select_defaults() {
-    SELECTED=''
-    for I in $(seq 1 "$MAX"); do
-        [ "$I" = 8 ] && [ "$DREAMONE" -ne 1 ] && continue
-        add_choice "$I"
-    done
-}
-
-read_byte() {
-    set -- $(LC_ALL=C dd bs=1 count=1 2>/dev/null | od -An -tu1)
-    printf '%s' "${1:-}"
-}
-
-menu_draw() {
-    printf '\033[2J\033[H'
-    printf '========================================================\n'
-    printf '  H. Hawwas Auto Installer v0.2.2\n'
-    printf '  Device: %s | CPU: %s\n' "${MODEL:-unknown}" "$(uname -m)"
-    printf '========================================================\n'
-
-    I=1
-    while [ "$I" -le "$MAX" ]; do
-        FLAG=' '
-        selected "$I" && FLAG=X
-
-        FOCUS=' '
-        [ "$I" -eq "$CURSOR" ] && FOCUS='>'
-
-        if [ "$I" -eq 8 ] && [ "$DREAMONE" -ne 1 ]; then
-            printf '%s %2d. [-] %s (not compatible)\n' \
-                "$FOCUS" "$I" "$(name_of "$I")"
-        else
-            printf '%s %2d. [%s] %s\n' \
-                "$FOCUS" "$I" "$FLAG" "$(name_of "$I")"
-        fi
-
-        I=$((I+1))
-    done
-
-    COUNT=0
-    for I in $SELECTED; do
-        COUNT=$((COUNT+1))
-    done
-
-    printf '\n  Selected: %s/%s plugins\n' "$COUNT" "$MAX"
-    printf '  UP/DOWN=Move | SPACE=Toggle | ENTER=Start | Q=Quit\n'
-    printf '  A=All | N=None | S=Start\n'
-}
-
-menu_restore() {
-    stty "$SAVED_TTY" 2>/dev/null || :
-    trap - 0 1 2 15
-}
-
-menu() {
-    select_defaults
-    CURSOR=1
-
-    SAVED_TTY=$(stty -g 2>/dev/null) || {
-        echo 'Terminal control unavailable.'
-        return 1
-    }
-
-    if ! stty -echo -icanon min 1 time 0 2>/dev/null; then
-        echo 'Cannot enable interactive terminal mode.'
-        return 1
-    fi
-
-    trap 'stty "$SAVED_TTY" 2>/dev/null || :' 0
-    trap 'exit 130' 2
-    trap 'exit 143' 1 15
-
-    while :; do
-        menu_draw
-        KEY=$(read_byte)
-
-        [ -n "$KEY" ] || {
-            menu_restore
-            return 1
-        }
-
-        case "$KEY" in
-            27)
-                stty min 0 time 2 2>/dev/null || :
-                SEQ1=$(read_byte)
-                SEQ2=''
-                [ -n "$SEQ1" ] && SEQ2=$(read_byte)
-                stty min 1 time 0 2>/dev/null || :
-
-                case "$SEQ1:$SEQ2" in
-                    91:65|79:65)
-                        CURSOR=$((CURSOR-1))
-                        [ "$CURSOR" -lt 1 ] && CURSOR=$MAX
-                        ;;
-                    91:66|79:66)
-                        CURSOR=$((CURSOR+1))
-                        [ "$CURSOR" -gt "$MAX" ] && CURSOR=1
-                        ;;
-                esac
-                ;;
-
-            32)
-                if [ "$CURSOR" -ne 8 ] || [ "$DREAMONE" -eq 1 ]; then
-                    if selected "$CURSOR"; then
-                        remove_choice "$CURSOR"
-                    else
-                        add_choice "$CURSOR"
-                    fi
-                fi
-                ;;
-
-            10|13|83|115)
-                COUNT=0
-                for I in $SELECTED; do
-                    COUNT=$((COUNT+1))
-                done
-
-                if [ "$COUNT" -gt 0 ]; then
-                    printf '%s\n' "$SELECTED" > "$SELECTION" || {
-                        menu_restore
-                        return 1
-                    }
-
-                    menu_restore
-                    printf '\nSelected %s plugins. Installation starts now.\n' "$COUNT"
-                    return 0
-                fi
-                ;;
-
-            81|113)
-                menu_restore
-                printf '\nCancelled: no installation started.\n'
-                return 1
-                ;;
-
-            65|97)
-                select_defaults
-                ;;
-
-            78|110)
-                SELECTED=''
-                ;;
-
-            49|50|51|52|53|54|55|56|57)
-                NUM=$((KEY-48))
-
-                if [ "$NUM" -ne 8 ] || [ "$DREAMONE" -eq 1 ]; then
-                    if selected "$NUM"; then
-                        remove_choice "$NUM"
-                    else
-                        add_choice "$NUM"
-                    fi
-                fi
-                ;;
-        esac
-    done
-}
-
-note() {
+say() {
     printf '%s\n' "$*"
 }
 
-emit() {
-    printf '%s\n' "$*" | tee -a "$PROGRESS"
+report() {
+    say "$*" | tee -a "$PROG"
 }
 
-progress() {
+bar() {
     PCT=$((DONE*100/TOTAL))
     FILL=$((DONE*20/TOTAL))
-    BAR=''
-    J=0
+    B=''
+    I=0
 
-    while [ "$J" -lt 20 ]; do
-        if [ "$J" -lt "$FILL" ]; then
-            BAR="${BAR}#"
+    while [ "$I" -lt 20 ]; do
+        if [ "$I" -lt "$FILL" ]; then
+            B="${B}#"
         else
-            BAR="${BAR}-"
+            B="${B}-"
         fi
-        J=$((J+1))
+        I=$((I+1))
     done
 
-    emit "PROGRESS [$BAR] $PCT% | $DONE/$TOTAL done | OK:$GOOD CHECK:$CHECK FAILED:$BAD"
+    report "PROGRESS [$B] $PCT% | $DONE/$TOTAL | OK:$OK CHECK:$CHECK FAILED:$FAIL"
 }
 
-heartbeat() {
-    LABEL=$1
-    SEC=0
-
+pulse() {
     while :; do
         sleep 20
-        SEC=$((SEC+20))
-        emit "  ... $LABEL still running ($SEC seconds)"
+        report "... $1 still installing"
     done
 }
 
 step() {
-    N=$((N+1))
-    LABEL=$1
+    NUM=$((NUM+1))
+    TITLE=$1
     shift
 
-    emit "[$N/$TOTAL] START: $LABEL"
+    report "[$NUM/$TOTAL] START: $TITLE"
 
-    heartbeat "$LABEL" &
-    HB_PID=$!
+    pulse "$TITLE" &
+    HB=$!
 
     "$@"
     RC=$?
 
-    kill "$HB_PID" 2>/dev/null || :
-    wait "$HB_PID" 2>/dev/null || :
+    kill "$HB" 2>/dev/null || :
+    wait "$HB" 2>/dev/null || :
 
     DONE=$((DONE+1))
 
     case "$RC" in
         0)
-            GOOD=$((GOOD+1))
-            emit "[$N/$TOTAL] OK: $LABEL"
+            OK=$((OK+1))
+            report "[$NUM/$TOTAL] OK: $TITLE"
             ;;
         2)
             CHECK=$((CHECK+1))
-            emit "[$N/$TOTAL] CHECK: $LABEL (see detailed log)"
+            report "[$NUM/$TOTAL] CHECK: $TITLE (see log)"
             ;;
         *)
-            BAD=$((BAD+1))
-            emit "[$N/$TOTAL] FAILED ($RC): $LABEL"
+            FAIL=$((FAIL+1))
+            report "[$NUM/$TOTAL] FAILED ($RC): $TITLE"
             ;;
     esac
 
-    progress
+    bar
 }
 
 remote() {
-    LABEL=$1
-    URL=$2
-    FILE=/tmp/openatv-plugin-$$.sh
+    U=$1
+    F=/tmp/hawwas-remote-$$.sh
 
-    note "Downloading installer: $LABEL"
-    rm -f "$FILE"
+    rm -f "$F"
 
-    if ! wget -O "$FILE" "$URL" || [ ! -s "$FILE" ]; then
-        note "Could not download $LABEL from $URL"
-        rm -f "$FILE"
+    if ! wget -qO "$F" "$U" || [ ! -s "$F" ]; then
+        say "Download failed: $U"
+        rm -f "$F"
         return 1
     fi
 
-    bash "$FILE"
-    RC=$?
+    bash "$F"
+    R=$?
 
-    rm -f "$FILE"
-    return "$RC"
+    rm -f "$F"
+    return "$R"
 }
 
 transmission() {
     opkg install transmission transmission-client python3-transmission-rpc xz || return 1
-    opkg install python3-beautifulsoup4 python3-yt-dlp || return 1
+    opkg install python3-beautifulsoup4 python3-yt-dlp
 }
 
-install_xstreamity() {
-    PKG=enigma2-plugin-extensions-xstreamity
+xstreamity() {
+    opkg list | awk '$1=="enigma2-plugin-extensions-xstreamity" {f=1} END {exit !f}' || return 1
 
-    opkg list | awk '$1=="enigma2-plugin-extensions-xstreamity" {found=1; exit} END {exit !found}' || {
-        note 'XStreamity missing from feed'
-        return 1
-    }
+    opkg install enigma2-plugin-extensions-xstreamity || return 1
 
-    opkg install "$PKG" || return 1
     opkg list-installed | grep -q '^enigma2-plugin-extensions-xstreamity '
 }
 
-install_ipaudiopro() {
-    if ! command -v ffmpeg >/dev/null 2>&1; then
-        opkg install ffmpeg || return 1
-    fi
+epggrabber() {
+    remote https://raw.githubusercontent.com/zKhadiri/Epg-plugin/master/Download/installer.sh || return 1
+
+    [ -d /usr/lib/enigma2/python/Plugins/Extensions/EPGGrabber ]
+}
+
+ncam() {
+    remote https://raw.githubusercontent.com/biko-73/Ncam_EMU/main/installer.sh || return 1
+
+    opkg list-installed | grep '^enigma2-plugin-softcams-ncam ' | grep -q '15\.8'
+}
+
+ipaudio() {
+    command -v ffmpeg >/dev/null 2>&1 || opkg install ffmpeg || return 1
 
     MAJOR=$(ffmpeg -version 2>/dev/null | awk 'NR==1 {split($3,a,"."); print a[1]}')
 
     case "$MAJOR" in
         7|8)
-            remote 'IPAudio Pro upstream' 'https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh'
+            remote https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh
             return $?
             ;;
         9)
-            note 'FFmpeg 9: using upstream ff8 build, runtime compatibility not guaranteed'
+            say 'FFmpeg 9: trying upstream FFmpeg 8 build; runtime compatibility is not assured'
             ;;
         *)
-            note "Unsupported FFmpeg $MAJOR"
+            say "Unsupported FFmpeg $MAJOR"
             return 1
             ;;
     esac
 
-    PY=$(python3 -c 'import sys; print("%s.%s" % sys.version_info[:2])' 2>/dev/null) || return 1
+    PY=$(python3 -c 'import sys;print("%d.%d" % sys.version_info[:2])') || return 1
 
     case "$PY" in
         3.12) FF=7.1 ;;
@@ -414,179 +178,590 @@ install_ipaudiopro() {
             ;;
     esac
 
-    wget -q -O /tmp/atv-ipaudio-meta-$$.sh 'https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh' || return 1
+    META=/tmp/hawwas-ipaudio-meta-$$.sh
 
-    VER=$(sed -n 's/^VERSION=\([0-9][0-9.]*\).*$/\1/p' /tmp/atv-ipaudio-meta-$$.sh | head -n 1)
-    rm -f /tmp/atv-ipaudio-meta-$$.sh
+    wget -qO "$META" https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh || return 1
+
+    VER=$(sed -n 's/^VERSION=\([0-9][0-9.]*\).*$/\1/p' "$META" | head -n 1)
+    rm -f "$META"
 
     [ -n "$VER" ] || return 1
 
     PKG="enigma2-plugin-extensions-ipaudiopro_${VER}_${ARCH}_py${PY}_ff${FF}.ipk"
+
     URL="https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/v${VER}/python${PY}/${DIR}/${PKG}"
-    FILE=/tmp/atv-ipaudiopro-$$.ipk
 
-    wget -O "$FILE" "$URL" && [ -s "$FILE" ] || {
-        rm -f "$FILE"
+    IPK=/tmp/hawwas-ipaudio-$$.ipk
+
+    if ! wget -qO "$IPK" "$URL" || [ ! -s "$IPK" ]; then
+        rm -f "$IPK"
         return 1
-    }
+    fi
 
-    opkg install "$FILE"
-    RC=$?
+    opkg install "$IPK"
+    R=$?
 
-    rm -f "$FILE"
-    [ "$RC" -eq 0 ] || return "$RC"
+    rm -f "$IPK"
+
+    [ "$R" -eq 0 ] || return "$R"
 
     opkg list-installed | grep -q '^enigma2-plugin-extensions-ipaudiopro '
 }
 
-install_epggrabber() {
-    remote 'EPG Grabber' 'https://raw.githubusercontent.com/zKhadiri/Epg-plugin/master/Download/installer.sh' || return 1
-    [ -d /usr/lib/enigma2/python/Plugins/Extensions/EPGGrabber ]
-}
+levi() {
+    IPK=/tmp/hawwas-levi-$$.ipk
 
-install_ncam() {
-    remote 'NCam 15.8' 'https://raw.githubusercontent.com/biko-73/Ncam_EMU/main/installer.sh' || return 1
+    URL=https://raw.githubusercontent.com/levi-45/Levi45Emulator/main/enigma2-plugin-softcams-oscam-emu-pcsc-levi45_11968-803_all.ipk
 
-    opkg list-installed | grep '^enigma2-plugin-softcams-ncam ' | grep -q '15\.8'
-}
-
-install_levi() {
-    URL='https://raw.githubusercontent.com/levi-45/Levi45Emulator/main/enigma2-plugin-softcams-oscam-emu-pcsc-levi45_11968-803_all.ipk'
-    FILE=/tmp/atv-levi45-$$.ipk
-
-    if ! wget -O "$FILE" "$URL" || [ ! -s "$FILE" ]; then
-        rm -f "$FILE"
+    if ! wget -qO "$IPK" "$URL" || [ ! -s "$IPK" ]; then
+        rm -f "$IPK"
         return 1
     fi
 
-    opkg install --force-overwrite "$FILE"
+    opkg install --force-overwrite "$IPK"
     RC=$?
 
-    rm -f "$FILE"
-    note "Levi45 opkg exit status: $RC"
+    rm -f "$IPK"
 
-    sleep 6
+    say "Levi45 opkg exit status: $RC"
 
     INSTALLED=$(opkg list-installed | grep -Ei '^enigma2-plugin[^ ]*oscam[^ ]*levi[^ ]* - ' | head -n 1)
 
     if [ -n "$INSTALLED" ]; then
-        note "Levi45 installed: $INSTALLED"
         [ "$RC" -eq 0 ] && return 0
         return 2
     fi
 
-    if [ -x /usr/bin/OSCam_11968-803 ]; then
-        note 'OSCam binary is present, but opkg registration is incomplete'
-        return 2
-    fi
+    [ -x /usr/bin/OSCam_11968-803 ] && return 2
 
     return 1
 }
 
-run_install() {
-    [ -r "$SELECTION" ] || {
-        echo 'No selection file'
+run() {
+    if [ ! -r "$CHOICES" ]; then
+        say 'No plugin selection.'
         exit 1
-    }
+    fi
 
-    CHOICES=$(cat "$SELECTION")
+    SELECTED=$(cat "$CHOICES")
 
     TOTAL=1
-    for K in $CHOICES; do
+    for K in $SELECTED; do
         TOTAL=$((TOTAL+1))
     done
 
-    N=0
+    NUM=0
     DONE=0
-    GOOD=0
-    BAD=0
+    OK=0
     CHECK=0
+    FAIL=0
 
-    : > "$PROGRESS"
+    : > "$PROG"
 
-    emit "H. Hawwas Auto Installer v0.2.2 | Model: ${MODEL:-unknown} | $TOTAL steps"
+    report "H. Hawwas Auto Installer v0.3.0 | $TOTAL steps"
 
-    step 'opkg update' opkg update
+    step 'Update OpenATV feed' opkg update
 
-    for K in $(seq 1 "$MAX"); do
-        case " $CHOICES " in
+    for K in $(seq 1 17); do
+        case " $SELECTED " in
             *" $K "*) : ;;
             *) continue ;;
         esac
 
-        LABEL=$(name_of "$K")
-
         case "$K" in
-            1) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/biko-73/AjPanel/main/installer.sh' ;;
-            2) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/popking159/SubsSupportPro/refs/heads/main/myinstaller.sh' ;;
-            3) step "$LABEL" transmission ;;
-            4) step "$LABEL" remote "$LABEL" 'http://dreambox4u.com/dreamarabia/Transmission_e2/Transmission_e2.sh' ;;
-            5) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/biko-73/TMBD/main/installer.sh' ;;
-            6) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/fairbird/ArabicSavior/main/installer.sh' ;;
-            7) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/fairbird/RaedQuickSignal/main/installer.sh' ;;
-            8) if [ "$DREAMONE" -eq 1 ]; then step "$LABEL" remote "$LABEL" 'https://xfayez95.github.io/audioshift/installer.sh'; fi ;;
-            9) step "$LABEL" install_ipaudiopro ;;
-            10) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/popking159/customchannelselection/refs/heads/main/myinstaller.sh' ;;
-            11) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/popking159/skins/refs/heads/main/aglareatv/installer.sh' ;;
-            12) step "$LABEL" remote "$LABEL" 'https://live-feed.net/enigma2/installer.sh' ;;
-            13) step "$LABEL" install_epggrabber ;;
-            14) step "$LABEL" install_xstreamity ;;
-            15) step "$LABEL" remote "$LABEL" 'https://raw.githubusercontent.com/Najar1991/MixAudio_All/refs/heads/main/install.sh' ;;
-            16) step "$LABEL" install_ncam ;;
-            17) step "$LABEL" install_levi ;;
+            1)
+                step 'AJ Panel' remote https://raw.githubusercontent.com/biko-73/AjPanel/main/installer.sh
+                ;;
+            2)
+                step 'SubsSupport Pro' remote https://raw.githubusercontent.com/popking159/SubsSupportPro/refs/heads/main/myinstaller.sh
+                ;;
+            3)
+                step 'Transmission Clients and Libraries' transmission
+                ;;
+            4)
+                step 'Transmission E2' remote http://dreambox4u.com/dreamarabia/Transmission_e2/Transmission_e2.sh
+                ;;
+            5)
+                step 'TMDB' remote https://raw.githubusercontent.com/biko-73/TMBD/main/installer.sh
+                ;;
+            6)
+                step 'Arabic Savior' remote https://raw.githubusercontent.com/fairbird/ArabicSavior/main/installer.sh
+                ;;
+            7)
+                step 'Raed Quick Signal' remote https://raw.githubusercontent.com/fairbird/RaedQuickSignal/main/installer.sh
+                ;;
+            8)
+                case "$(cat /proc/stb/info/model 2>/dev/null)" in
+                    one|dreamone|dreamboxone)
+                        step 'AudioShift' remote https://xfayez95.github.io/audioshift/installer.sh
+                        ;;
+                esac
+                ;;
+            9)
+                step 'IPAudio Pro' ipaudio
+                ;;
+            10)
+                step 'Custom Channel Selection' remote https://raw.githubusercontent.com/popking159/customchannelselection/refs/heads/main/myinstaller.sh
+                ;;
+            11)
+                step 'Aglare Skin' remote https://raw.githubusercontent.com/popking159/skins/refs/heads/main/aglareatv/installer.sh
+                ;;
+            12)
+                step 'LiveFeed OE' remote https://live-feed.net/enigma2/installer.sh
+                ;;
+            13)
+                step 'EPG Grabber' epggrabber
+                ;;
+            14)
+                step 'XStreamity' xstreamity
+                ;;
+            15)
+                step 'MixAudio' remote https://raw.githubusercontent.com/Najar1991/MixAudio_All/refs/heads/main/install.sh
+                ;;
+            16)
+                step 'NCam 15.8' ncam
+                ;;
+            17)
+                step 'OSCam Levi45' levi
+                ;;
         esac
     done
 
-    emit '===== INSTALLATION FINISHED ====='
-    progress
+    report '=== INSTALLATION FINISHED ==='
+    bar
 
-    emit "Detailed log: $LOG"
-    emit "Progress log: $PROGRESS"
-    emit 'GSH2 was NOT installed.'
-    emit 'Full receiver reboot in 5 seconds.'
+    report "Results: OK=$OK CHECK=$CHECK FAILED=$FAIL"
+    report "Full log: $LOG"
+    report 'GSH2 was NOT installed.'
+    report 'Full receiver reboot in 5 seconds.'
 
-    rm -f "$PIDFILE"
     sync
     sleep 5
+
+    rm -f /tmp/hawwas-installer.pid
     reboot
 }
 
 if [ "${1:-}" = '--run' ]; then
-    if [ "$(id -u)" -ne 0 ] || ! command -v opkg >/dev/null 2>&1; then
-        echo 'ERROR: Root + opkg-based OpenATV required'
-        exit 1
-    fi
-
-    if ! command -v bash >/dev/null 2>&1; then
-        opkg update && opkg install bash || exit 1
-    fi
-
-    run_install
+    run
     exit $?
 fi
 
-if [ ! -t 0 ]; then
-    echo 'ERROR: Run from an interactive SSH/Telnet session.'
+if [ "$(id -u)" -ne 0 ]; then
+    say 'ERROR: Run as root'
     exit 1
 fi
 
-if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-    echo "Another OpenATV installation is running."
-    echo "Monitor it: tail -n 30 -f $PROGRESS"
+if ! command -v opkg >/dev/null 2>&1; then
+    say 'ERROR: OpenATV/opkg required'
     exit 1
 fi
 
-if ! menu; then
-    exit 0
+if ! command -v python3 >/dev/null 2>&1; then
+    say 'ERROR: Python3 required'
+    exit 1
 fi
 
-: > "$PROGRESS" || exit 1
-: > "$LOG" || exit 1
+mkdir -p /home/root "$PLUG" || exit 1
 
-nohup sh "$SELF" --run > "$LOG" 2>&1 < /dev/null &
-RUN_PID=$!
+cp "$0" "$CORE" || exit 1
+chmod 755 "$CORE"
 
-printf '%s\n' "$RUN_PID" > "$PIDFILE"
+cat > "$PLUG/plugin.py" <<'PY'
+# H. Hawwas Auto Installer v0.3.0 - Enigma2 TV interface
 
-echo "Installer started as PID $RUN_PID. Live progress follows:"
-tail -n +1 -f "$PROGRESS"
+from __future__ import absolute_import
+
+import os
+import subprocess
+
+from enigma import eTimer
+from Plugins.Plugin import PluginDescriptor
+from Screens.Screen import Screen
+from Components.ActionMap import ActionMap
+from Components.Label import Label
+from Components.MenuList import MenuList
+
+BASE = '/home/root/'
+CORE = BASE + 'hhawwas-core.sh'
+CHOICES = '/tmp/hawwas-choices.txt'
+PROGRESS = BASE + 'openatv-progress.log'
+LOG = BASE + 'openatv-install.log'
+PENDING = '/tmp/hawwas-show-menu'
+PIDFILE = '/tmp/hawwas-installer.pid'
+
+TITLE = 'H. Hawwas Auto Installer v0.3.0'
+
+NAMES = [
+    'AJ Panel',
+    'SubsSupport Pro',
+    'Transmission Clients + Libraries',
+    'Transmission E2',
+    'TMDB',
+    'Arabic Savior',
+    'Raed Quick Signal',
+    'AudioShift (Dreambox One only)',
+    'IPAudio Pro',
+    'Custom Channel Selection',
+    'Aglare Skin',
+    'LiveFeed OE',
+    'EPG Grabber',
+    'XStreamity (OpenATV feed)',
+    'MixAudio',
+    'NCam 15.8',
+    'OSCam Levi45 11968 (experimental)'
+]
+
+
+def is_one():
+    try:
+        return open('/proc/stb/info/model').read().strip() in (
+            'one', 'dreamone', 'dreamboxone'
+        )
+    except Exception:
+        return False
+
+
+def active():
+    try:
+        pid = int(open(PIDFILE).read().strip())
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+class HawwasPicker(Screen):
+
+    skin = '''<screen name="HawwasPicker"
+        position="center,center"
+        size="1100,650"
+        title="H. Hawwas Auto Installer"
+        backgroundColor="#121b29">
+
+        <widget name="heading"
+            position="25,18" size="1050,45"
+            font="Regular;32"
+            foregroundColor="#ffffff"
+            backgroundColor="#121b29" />
+
+        <widget name="help"
+            position="25,65" size="1050,35"
+            font="Regular;23"
+            foregroundColor="#e0b85b"
+            backgroundColor="#121b29" />
+
+        <widget name="items"
+            position="25,115" size="1050,400"
+            scrollbarMode="showOnDemand" />
+
+        <widget name="summary"
+            position="25,526" size="1050,32"
+            font="Regular;23"
+            foregroundColor="#ffffff"
+            backgroundColor="#121b29" />
+
+        <widget name="keys"
+            position="25,572" size="1050,40"
+            font="Regular;24"
+            foregroundColor="#90db9d"
+            backgroundColor="#121b29" />
+
+    </screen>'''
+
+    def __init__(self, session):
+        Screen.__init__(self, session)
+
+        self.allowed = [
+            i for i in range(17)
+            if i != 7 or is_one()
+        ]
+
+        self.checked = set(self.allowed)
+
+        self['heading'] = Label(TITLE)
+
+        self['help'] = Label(
+            'UP / DOWN: select    OK: tick / untick'
+        )
+
+        self['items'] = MenuList([])
+        self['summary'] = Label('')
+
+        self['keys'] = Label(
+            'GREEN: Install    YELLOW: All    BLUE: None    RED: Exit'
+        )
+
+        self['actions'] = ActionMap(
+            ['OkCancelActions', 'DirectionActions', 'ColorActions'],
+            {
+                'up': self.up,
+                'down': self.down,
+                'ok': self.toggle,
+                'green': self.install,
+                'yellow': self.all,
+                'blue': self.none,
+                'red': self.close,
+                'cancel': self.close
+            },
+            -1
+        )
+
+        self.refresh()
+
+    def refresh(self):
+        index = self['items'].getCurrentIndex()
+        rows = []
+
+        for i, name in enumerate(NAMES):
+            if i not in self.allowed:
+                flag = '[-]'
+            else:
+                flag = '[X]' if i in self.checked else '[ ]'
+
+            rows.append(
+                '%02d  %s  %s' % (i + 1, flag, name)
+            )
+
+        self['items'].setList(rows)
+
+        if index >= 0:
+            self['items'].moveToIndex(index)
+
+        self['summary'].setText(
+            'Selected: %d / %d plugins' %
+            (len(self.checked), len(self.allowed))
+        )
+
+    def up(self):
+        self['items'].up()
+
+    def down(self):
+        self['items'].down()
+
+    def toggle(self):
+        i = self['items'].getCurrentIndex()
+
+        if i not in self.allowed:
+            return
+
+        if i in self.checked:
+            self.checked.remove(i)
+        else:
+            self.checked.add(i)
+
+        self.refresh()
+
+    def all(self):
+        self.checked = set(self.allowed)
+        self.refresh()
+
+    def none(self):
+        self.checked = set()
+        self.refresh()
+
+    def install(self):
+        if not self.checked:
+            self['summary'].setText(
+                'Choose at least one plugin before installing.'
+            )
+            return
+
+        if active():
+            self.session.open(HawwasProgress)
+            return
+
+        try:
+            with open(CHOICES, 'w') as f:
+                f.write(
+                    ' '.join(
+                        str(i + 1) for i in sorted(self.checked)
+                    ) + '\n'
+                )
+
+            logfile = open(LOG, 'w')
+
+            proc = subprocess.Popen(
+                ['/bin/sh', CORE, '--run'],
+                stdin=subprocess.DEVNULL,
+                stdout=logfile,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                start_new_session=True
+            )
+
+            logfile.close()
+
+            with open(PIDFILE, 'w') as f:
+                f.write(str(proc.pid))
+
+            self.session.open(HawwasProgress)
+
+        except Exception as e:
+            self['summary'].setText(
+                'START FAILED: %s' % str(e)[:75]
+            )
+
+
+class HawwasProgress(Screen):
+
+    skin = '''<screen name="HawwasProgress"
+        position="center,center"
+        size="1100,620"
+        title="H. Hawwas Installation Progress"
+        backgroundColor="#121b29">
+
+        <widget name="heading"
+            position="25,20" size="1050,48"
+            font="Regular;31"
+            foregroundColor="#ffffff"
+            backgroundColor="#121b29" />
+
+        <widget name="status"
+            position="25,85" size="1050,445"
+            font="Regular;23"
+            foregroundColor="#dddddd"
+            backgroundColor="#121b29" />
+
+        <widget name="keys"
+            position="25,552" size="1050,40"
+            font="Regular;23"
+            foregroundColor="#90db9d"
+            backgroundColor="#121b29" />
+
+    </screen>'''
+
+    def __init__(self, session):
+        Screen.__init__(self, session)
+
+        self['heading'] = Label(TITLE + ' - Progress')
+        self['status'] = Label('Starting installation...')
+
+        self['keys'] = Label(
+            'RED / EXIT: Hide screen (installation continues)'
+        )
+
+        self['actions'] = ActionMap(
+            ['OkCancelActions', 'ColorActions'],
+            {
+                'cancel': self.close,
+                'red': self.close
+            },
+            -1
+        )
+
+        self.timer = eTimer()
+        self.timer.callback.append(self.update)
+
+        self.onShown.append(self.begin)
+        self.onClose.append(self.stop)
+
+    def begin(self):
+        self.update()
+        self.timer.start(1500, False)
+
+    def stop(self):
+        self.timer.stop()
+
+    def update(self):
+        try:
+            lines = open(PROGRESS).read().splitlines()
+
+            txt = '\n'.join(lines[-14:])
+
+            self['status'].setText(
+                txt or 'Preparing the installer...'
+            )
+
+        except Exception:
+            self['status'].setText(
+                'Preparing the installer...'
+            )
+
+
+_pendingTimer = None
+_pendingConn = None
+_session = None
+
+
+def show_pending():
+    global _pendingTimer
+
+    if _pendingTimer is not None:
+        _pendingTimer.stop()
+
+    if _session is None:
+        return
+
+    if active():
+        _session.open(HawwasProgress)
+
+    elif os.path.exists(PENDING):
+        try:
+            os.unlink(PENDING)
+        except Exception:
+            pass
+
+        _session.open(HawwasPicker)
+
+
+def session_start(reason, **kwargs):
+    global _pendingTimer, _pendingConn, _session
+
+    if reason != 0 or 'session' not in kwargs:
+        return
+
+    _session = kwargs['session']
+
+    if not active() and not os.path.exists(PENDING):
+        return
+
+    _pendingTimer = eTimer()
+
+    try:
+        _pendingTimer.callback.append(show_pending)
+    except AttributeError:
+        _pendingConn = _pendingTimer.timeout.connect(show_pending)
+
+    _pendingTimer.start(5000, True)
+
+
+def open_plugin(session, **kwargs):
+    session.open(
+        HawwasProgress if active() else HawwasPicker
+    )
+
+
+def Plugins(**kwargs):
+    return [
+        PluginDescriptor(
+            name='H. Hawwas Auto Installer',
+            description='Select and install OpenATV plugins on TV',
+            where=PluginDescriptor.WHERE_PLUGINMENU,
+            fnc=open_plugin
+        ),
+
+        PluginDescriptor(
+            where=PluginDescriptor.WHERE_SESSIONSTART,
+            fnc=session_start
+        )
+    ]
+PY
+
+python3 -m py_compile "$PLUG/plugin.py" || {
+    say 'ERROR: Enigma2 plugin Python syntax failed'
+    exit 1
+}
+
+touch "$PLUG/__init__.py"
+touch /tmp/hawwas-show-menu
+
+say 'H. Hawwas Auto Installer v0.3.0 installed.'
+say 'Restarting Enigma2 GUI to show the plugin list on TV.'
+say 'Use UP/DOWN, OK to toggle, GREEN to start.'
+say 'If it does not pop up, open Plugins -> H. Hawwas Auto Installer.'
+
+nohup sh -c 'sleep 2; init 4; sleep 3; init 3' \
+    > /home/root/hawwas-launch.log 2>&1 < /dev/null &
+
+exit 0
