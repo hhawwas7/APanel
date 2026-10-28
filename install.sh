@@ -1,5 +1,5 @@
 #!/bin/sh
-# H. Hawwas Auto Installer v0.3.0 - TV Edition
+# H. Hawwas Auto Installer v0.3.1 - TV Edition
 # OpenATV / opkg only
 # GSH2 is deliberately excluded.
 
@@ -7,7 +7,7 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
 CORE=/home/root/hhawwas-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/HawwasInstaller
-CHOICES=/tmp/hhawwas-choices.txt
+CHOICES=/tmp/hawwas-choices.txt
 PROG=/home/root/openatv-progress.log
 LOG=/home/root/openatv-install.log
 
@@ -258,7 +258,7 @@ run() {
 
     : > "$PROG"
 
-    report "H. Hawwas Auto Installer v0.3.0 | $TOTAL steps"
+    report "H. Hawwas Auto Installer v0.3.1 | $TOTAL steps"
 
     step 'Update OpenATV feed' opkg update
 
@@ -368,7 +368,7 @@ cp "$0" "$CORE" || exit 1
 chmod 755 "$CORE"
 
 cat > "$PLUG/plugin.py" <<'PY'
-# H. Hawwas Auto Installer v0.3.0 - Enigma2 TV interface
+# H. Hawwas Auto Installer v0.3.1 - Enigma2 TV interface
 
 from __future__ import absolute_import
 
@@ -390,7 +390,7 @@ LOG = BASE + 'openatv-install.log'
 PENDING = '/tmp/hawwas-show-menu'
 PIDFILE = '/tmp/hawwas-installer.pid'
 
-TITLE = 'H. Hawwas Auto Installer v0.3.0'
+TITLE = 'H. Hawwas Auto Installer v0.3.1'
 
 NAMES = [
     'AJ Panel',
@@ -748,7 +748,7 @@ def Plugins(**kwargs):
     ]
 PY
 
-python3 -m py_compile "$PLUG/plugin.py" || {
+python3 -c 'import sys; p=sys.argv[1]; compile(open(p,"rb").read(),p,"exec"); print("Python syntax OK")' "$PLUG/plugin.py" || {
     say 'ERROR: Enigma2 plugin Python syntax failed'
     exit 1
 }
@@ -756,7 +756,7 @@ python3 -m py_compile "$PLUG/plugin.py" || {
 touch "$PLUG/__init__.py"
 touch /tmp/hawwas-show-menu
 
-say 'H. Hawwas Auto Installer v0.3.0 installed.'
+say 'H. Hawwas Auto Installer v0.3.1 installed.'
 say 'Restarting Enigma2 GUI to show the plugin list on TV.'
 say 'Use UP/DOWN, OK to toggle, GREEN to start.'
 say 'If it does not pop up, open Plugins -> H. Hawwas Auto Installer.'
