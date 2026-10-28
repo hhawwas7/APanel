@@ -1,32 +1,37 @@
 #!/bin/sh
-# H. Hawwas Auto Installer v0.3.1 - TV Edition
-# OpenATV / opkg only
-# GSH2 is deliberately excluded.
+# Hawwas Panel v0.3.2 - OpenATV Enigma2 TV installer
+# OpenATV / opkg only. GSH2 is intentionally excluded.
+# Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-CORE=/home/root/hhawwas-core.sh
+VERSION=v0.3.2
+ROOT=/home/root
+CORE=$ROOT/hhawwas-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/HawwasInstaller
 CHOICES=/tmp/hawwas-choices.txt
-PROG=/home/root/openatv-progress.log
-LOG=/home/root/openatv-install.log
+PROGRESS=$ROOT/openatv-progress.log
+LOG=$ROOT/openatv-install.log
+READY=/tmp/hawwas-ui-ready
+REQUEST=/tmp/hawwas-ui-request
+PIDFILE=/tmp/hawwas-installer.pid
 
 say() {
     printf '%s\n' "$*"
 }
 
 report() {
-    say "$*" | tee -a "$PROG"
+    say "$*" | tee -a "$PROGRESS"
 }
 
 bar() {
-    PCT=$((DONE*100/TOTAL))
-    FILL=$((DONE*20/TOTAL))
+    PC=$((DONE*100/TOTAL))
+    FILLED=$((DONE*20/TOTAL))
     B=''
     I=0
 
     while [ "$I" -lt 20 ]; do
-        if [ "$I" -lt "$FILL" ]; then
+        if [ "$I" -lt "$FILLED" ]; then
             B="${B}#"
         else
             B="${B}-"
@@ -34,7 +39,7 @@ bar() {
         I=$((I+1))
     done
 
-    report "PROGRESS [$B] $PCT% | $DONE/$TOTAL | OK:$OK CHECK:$CHECK FAILED:$FAIL"
+    report "PROGRESS [$B] $PC% | $DONE/$TOTAL | OK:$OK CHECK:$CHECK FAILED:$FAIL"
 }
 
 pulse() {
@@ -46,12 +51,12 @@ pulse() {
 
 step() {
     NUM=$((NUM+1))
-    TITLE=$1
+    LABEL=$1
     shift
 
-    report "[$NUM/$TOTAL] START: $TITLE"
+    report "[$NUM/$TOTAL] START: $LABEL"
 
-    pulse "$TITLE" &
+    pulse "$LABEL" &
     HB=$!
 
     "$@"
@@ -65,15 +70,15 @@ step() {
     case "$RC" in
         0)
             OK=$((OK+1))
-            report "[$NUM/$TOTAL] OK: $TITLE"
+            report "[$NUM/$TOTAL] OK: $LABEL"
             ;;
         2)
             CHECK=$((CHECK+1))
-            report "[$NUM/$TOTAL] CHECK: $TITLE (see log)"
+            report "[$NUM/$TOTAL] CHECK: $LABEL (see log)"
             ;;
         *)
             FAIL=$((FAIL+1))
-            report "[$NUM/$TOTAL] FAILED ($RC): $TITLE"
+            report "[$NUM/$TOTAL] FAILED ($RC): $LABEL"
             ;;
     esac
 
@@ -81,22 +86,22 @@ step() {
 }
 
 remote() {
-    U=$1
-    F=/tmp/hawwas-remote-$$.sh
+    URL=$1
+    FILE=/tmp/hawwas-remote-$$.sh
 
-    rm -f "$F"
+    rm -f "$FILE"
 
-    if ! wget -qO "$F" "$U" || [ ! -s "$F" ]; then
-        say "Download failed: $U"
-        rm -f "$F"
+    if ! wget -qO "$FILE" "$URL" || [ ! -s "$FILE" ]; then
+        say "Download failed: $URL"
+        rm -f "$FILE"
         return 1
     fi
 
-    bash "$F"
-    R=$?
+    bash "$FILE"
+    RC=$?
 
-    rm -f "$F"
-    return "$R"
+    rm -f "$FILE"
+    return "$RC"
 }
 
 transmission() {
@@ -119,6 +124,7 @@ epggrabber() {
 }
 
 ncam() {
+    # Current upstream installer provides NCam 15.8.
     remote https://raw.githubusercontent.com/biko-73/Ncam_EMU/main/installer.sh || return 1
 
     opkg list-installed | grep '^enigma2-plugin-softcams-ncam ' | grep -q '15\.8'
@@ -135,7 +141,7 @@ ipaudio() {
             return $?
             ;;
         9)
-            say 'FFmpeg 9: trying upstream FFmpeg 8 build; runtime compatibility is not assured'
+            say 'FFmpeg 9: using upstream FFmpeg 8 build; runtime compatibility not guaranteed'
             ;;
         *)
             say "Unsupported FFmpeg $MAJOR"
@@ -143,7 +149,7 @@ ipaudio() {
             ;;
     esac
 
-    PY=$(python3 -c 'import sys;print("%d.%d" % sys.version_info[:2])') || return 1
+    PY=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])') || return 1
 
     case "$PY" in
         3.12) FF=7.1 ;;
@@ -183,6 +189,7 @@ ipaudio() {
     wget -qO "$META" https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh || return 1
 
     VER=$(sed -n 's/^VERSION=\([0-9][0-9.]*\).*$/\1/p' "$META" | head -n 1)
+
     rm -f "$META"
 
     [ -n "$VER" ] || return 1
@@ -199,19 +206,20 @@ ipaudio() {
     fi
 
     opkg install "$IPK"
-    R=$?
+    RC=$?
 
     rm -f "$IPK"
 
-    [ "$R" -eq 0 ] || return "$R"
+    [ "$RC" -eq 0 ] || return "$RC"
 
     opkg list-installed | grep -q '^enigma2-plugin-extensions-ipaudiopro '
 }
 
 levi() {
-    IPK=/tmp/hawwas-levi-$$.ipk
-
+    # Fixed Levi45 build.
     URL=https://raw.githubusercontent.com/levi-45/Levi45Emulator/main/enigma2-plugin-softcams-oscam-emu-pcsc-levi45_11968-803_all.ipk
+
+    IPK=/tmp/hawwas-levi-$$.ipk
 
     if ! wget -qO "$IPK" "$URL" || [ ! -s "$IPK" ]; then
         rm -f "$IPK"
@@ -238,10 +246,10 @@ levi() {
 }
 
 run() {
-    if [ ! -r "$CHOICES" ]; then
+    [ -r "$CHOICES" ] || {
         say 'No plugin selection.'
-        exit 1
-    fi
+        return 1
+    }
 
     SELECTED=$(cat "$CHOICES")
 
@@ -256,9 +264,9 @@ run() {
     CHECK=0
     FAIL=0
 
-    : > "$PROG"
+    : > "$PROGRESS"
 
-    report "H. Hawwas Auto Installer v0.3.1 | $TOTAL steps"
+    report "Hawwas Panel $VERSION | $TOTAL steps"
 
     step 'Update OpenATV feed' opkg update
 
@@ -276,7 +284,7 @@ run() {
                 step 'SubsSupport Pro' remote https://raw.githubusercontent.com/popking159/SubsSupportPro/refs/heads/main/myinstaller.sh
                 ;;
             3)
-                step 'Transmission Clients and Libraries' transmission
+                step 'Transmission Clients + Libraries' transmission
                 ;;
             4)
                 step 'Transmission E2' remote http://dreambox4u.com/dreamarabia/Transmission_e2/Transmission_e2.sh
@@ -319,7 +327,7 @@ run() {
                 step 'MixAudio' remote https://raw.githubusercontent.com/Najar1991/MixAudio_All/refs/heads/main/install.sh
                 ;;
             16)
-                step 'NCam 15.8' ncam
+                step 'NCam' ncam
                 ;;
             17)
                 step 'OSCam Levi45' levi
@@ -338,22 +346,18 @@ run() {
     sync
     sleep 5
 
-    rm -f /tmp/hawwas-installer.pid
+    rm -f "$PIDFILE"
     reboot
 }
 
 if [ "${1:-}" = '--run' ]; then
+    [ "$(id -u)" -eq 0 ] && command -v opkg >/dev/null 2>&1 || exit 1
     run
     exit $?
 fi
 
-if [ "$(id -u)" -ne 0 ]; then
-    say 'ERROR: Run as root'
-    exit 1
-fi
-
-if ! command -v opkg >/dev/null 2>&1; then
-    say 'ERROR: OpenATV/opkg required'
+if [ "$(id -u)" -ne 0 ] || ! command -v opkg >/dev/null 2>&1; then
+    say 'ERROR: Root and OpenATV/opkg required'
     exit 1
 fi
 
@@ -362,13 +366,27 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-mkdir -p /home/root "$PLUG" || exit 1
+# Open the menu without restarting an already loaded GUI.
+
+if [ -r "$READY" ]; then
+    read -r UI_VERSION UI_PID < "$READY"
+
+    if [ "$UI_VERSION" = "$VERSION" ] && [ -n "$UI_PID" ] && kill -0 "$UI_PID" 2>/dev/null; then
+        : > "$REQUEST"
+        say "Hawwas Panel $VERSION: opening the TV menu now."
+        exit 0
+    fi
+fi
+
+# New installation or GUI plugin update.
+
+mkdir -p "$ROOT" "$PLUG" || exit 1
 
 cp "$0" "$CORE" || exit 1
 chmod 755 "$CORE"
 
 cat > "$PLUG/plugin.py" <<'PY'
-# H. Hawwas Auto Installer v0.3.1 - Enigma2 TV interface
+# Hawwas Panel v0.3.2 - Enigma2 TV interface
 
 from __future__ import absolute_import
 
@@ -382,15 +400,18 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.MenuList import MenuList
 
+VERSION = 'v0.3.2'
+TITLE = 'Hawwas Panel ' + VERSION
+AUTHOR = 'by H. Hawwas'
+
 BASE = '/home/root/'
 CORE = BASE + 'hhawwas-core.sh'
 CHOICES = '/tmp/hawwas-choices.txt'
 PROGRESS = BASE + 'openatv-progress.log'
 LOG = BASE + 'openatv-install.log'
-PENDING = '/tmp/hawwas-show-menu'
+REQUEST = '/tmp/hawwas-ui-request'
+READY = '/tmp/hawwas-ui-ready'
 PIDFILE = '/tmp/hawwas-installer.pid'
-
-TITLE = 'H. Hawwas Auto Installer v0.3.1'
 
 NAMES = [
     'AJ Panel',
@@ -408,23 +429,25 @@ NAMES = [
     'EPG Grabber',
     'XStreamity (OpenATV feed)',
     'MixAudio',
-    'NCam 15.8',
-    'OSCam Levi45 11968 (experimental)'
+    'NCam',
+    'OSCam Levi45'
 ]
 
 
 def is_one():
     try:
-        return open('/proc/stb/info/model').read().strip() in (
-            'one', 'dreamone', 'dreamboxone'
-        )
+        with open('/proc/stb/info/model') as f:
+            return f.read().strip() in (
+                'one', 'dreamone', 'dreamboxone'
+            )
     except Exception:
         return False
 
 
 def active():
     try:
-        pid = int(open(PIDFILE).read().strip())
+        with open(PIDFILE) as f:
+            pid = int(f.read().strip())
         os.kill(pid, 0)
         return True
     except Exception:
@@ -436,7 +459,7 @@ class HawwasPicker(Screen):
     skin = '''<screen name="HawwasPicker"
         position="center,center"
         size="1100,650"
-        title="H. Hawwas Auto Installer"
+        title="Hawwas Panel"
         backgroundColor="#121b29">
 
         <widget name="heading"
@@ -479,21 +502,27 @@ class HawwasPicker(Screen):
 
         self.checked = set(self.allowed)
 
-        self['heading'] = Label(TITLE)
+        self['heading'] = Label(
+            TITLE + '  |  ' + AUTHOR
+        )
 
         self['help'] = Label(
-            'UP / DOWN: select    OK: tick / untick'
+            'UP / DOWN: select     OK: tick / untick'
         )
 
         self['items'] = MenuList([])
         self['summary'] = Label('')
 
         self['keys'] = Label(
-            'GREEN: Install    YELLOW: All    BLUE: None    RED: Exit'
+            'GREEN: Install   YELLOW: All   BLUE: None   RED: Exit'
         )
 
         self['actions'] = ActionMap(
-            ['OkCancelActions', 'DirectionActions', 'ColorActions'],
+            [
+                'OkCancelActions',
+                'DirectionActions',
+                'ColorActions'
+            ],
             {
                 'up': self.up,
                 'down': self.down,
@@ -516,8 +545,10 @@ class HawwasPicker(Screen):
         for i, name in enumerate(NAMES):
             if i not in self.allowed:
                 flag = '[-]'
+            elif i in self.checked:
+                flag = '[X]'
             else:
-                flag = '[X]' if i in self.checked else '[ ]'
+                flag = '[ ]'
 
             rows.append(
                 '%02d  %s  %s' % (i + 1, flag, name)
@@ -563,7 +594,7 @@ class HawwasPicker(Screen):
     def install(self):
         if not self.checked:
             self['summary'].setText(
-                'Choose at least one plugin before installing.'
+                'Select at least one plugin.'
             )
             return
 
@@ -575,7 +606,7 @@ class HawwasPicker(Screen):
             with open(CHOICES, 'w') as f:
                 f.write(
                     ' '.join(
-                        str(i + 1) for i in sorted(self.checked)
+                        str(i+1) for i in sorted(self.checked)
                     ) + '\n'
                 )
 
@@ -599,7 +630,7 @@ class HawwasPicker(Screen):
 
         except Exception as e:
             self['summary'].setText(
-                'START FAILED: %s' % str(e)[:75]
+                'START FAILED: %s' % str(e)[:90]
             )
 
 
@@ -608,7 +639,7 @@ class HawwasProgress(Screen):
     skin = '''<screen name="HawwasProgress"
         position="center,center"
         size="1100,620"
-        title="H. Hawwas Installation Progress"
+        title="Hawwas Panel Progress"
         backgroundColor="#121b29">
 
         <widget name="heading"
@@ -634,8 +665,13 @@ class HawwasProgress(Screen):
     def __init__(self, session):
         Screen.__init__(self, session)
 
-        self['heading'] = Label(TITLE + ' - Progress')
-        self['status'] = Label('Starting installation...')
+        self['heading'] = Label(
+            TITLE + ' - Progress'
+        )
+
+        self['status'] = Label(
+            'Preparing installation...'
+        )
 
         self['keys'] = Label(
             'RED / EXIT: Hide screen (installation continues)'
@@ -651,7 +687,13 @@ class HawwasProgress(Screen):
         )
 
         self.timer = eTimer()
-        self.timer.callback.append(self.update)
+
+        try:
+            self.timer.callback.append(self.update)
+        except AttributeError:
+            self.timer_conn = self.timer.timeout.connect(
+                self.update
+            )
 
         self.onShown.append(self.begin)
         self.onClose.append(self.stop)
@@ -665,78 +707,103 @@ class HawwasProgress(Screen):
 
     def update(self):
         try:
-            lines = open(PROGRESS).read().splitlines()
-
-            txt = '\n'.join(lines[-14:])
+            with open(PROGRESS) as f:
+                txt = '\n'.join(
+                    f.read().splitlines()[-13:]
+                )
 
             self['status'].setText(
-                txt or 'Preparing the installer...'
+                txt or 'Preparing installation...'
             )
 
         except Exception:
             self['status'].setText(
-                'Preparing the installer...'
+                'Preparing installation...'
             )
 
 
-_pendingTimer = None
-_pendingConn = None
 _session = None
+_poll = None
+_poll_conn = None
+_opening = False
 
 
-def show_pending():
-    global _pendingTimer
+def poll_request():
+    global _opening
 
-    if _pendingTimer is not None:
-        _pendingTimer.stop()
-
-    if _session is None:
+    if _session is None or _opening:
         return
 
-    if active():
-        _session.open(HawwasProgress)
+    if not os.path.exists(REQUEST):
+        return
 
-    elif os.path.exists(PENDING):
+    _opening = True
+
+    try:
+        os.unlink(REQUEST)
+
+        if active():
+            _session.open(HawwasProgress)
+        else:
+            _session.open(HawwasPicker)
+
+    except Exception as e:
+        print('[Hawwas Panel] Open failed:', e)
+
         try:
-            os.unlink(PENDING)
+            open(REQUEST, 'w').close()
         except Exception:
             pass
 
-        _session.open(HawwasPicker)
+    finally:
+        _opening = False
 
 
 def session_start(reason, **kwargs):
-    global _pendingTimer, _pendingConn, _session
+    global _session, _poll, _poll_conn
 
     if reason != 0 or 'session' not in kwargs:
         return
 
     _session = kwargs['session']
-
-    if not active() and not os.path.exists(PENDING):
-        return
-
-    _pendingTimer = eTimer()
+    _poll = eTimer()
 
     try:
-        _pendingTimer.callback.append(show_pending)
+        _poll.callback.append(poll_request)
     except AttributeError:
-        _pendingConn = _pendingTimer.timeout.connect(show_pending)
+        _poll_conn = _poll.timeout.connect(
+            poll_request
+        )
 
-    _pendingTimer.start(5000, True)
+    _poll.start(1500, False)
+
+    try:
+        with open(READY, 'w') as f:
+            f.write(
+                '%s %d\n' % (VERSION, os.getpid())
+            )
+    except Exception:
+        pass
+
+    if active() and not os.path.exists(REQUEST):
+        try:
+            open(REQUEST, 'w').close()
+        except Exception:
+            pass
 
 
 def open_plugin(session, **kwargs):
-    session.open(
-        HawwasProgress if active() else HawwasPicker
-    )
+    if active():
+        session.open(HawwasProgress)
+    else:
+        session.open(HawwasPicker)
 
 
 def Plugins(**kwargs):
     return [
         PluginDescriptor(
-            name='H. Hawwas Auto Installer',
-            description='Select and install OpenATV plugins on TV',
+            name='Hawwas Panel',
+            description='H. Hawwas OpenATV plugin installer',
             where=PluginDescriptor.WHERE_PLUGINMENU,
             fnc=open_plugin
         ),
@@ -748,18 +815,21 @@ def Plugins(**kwargs):
     ]
 PY
 
+# Built-in syntax check, no py_compile module needed.
+
 python3 -c 'import sys; p=sys.argv[1]; compile(open(p,"rb").read(),p,"exec"); print("Python syntax OK")' "$PLUG/plugin.py" || {
-    say 'ERROR: Enigma2 plugin Python syntax failed'
+    say 'ERROR: Hawwas Panel Python syntax failed'
     exit 1
 }
 
-touch "$PLUG/__init__.py"
-touch /tmp/hawwas-show-menu
+touch "$PLUG/__init__.py" || exit 1
 
-say 'H. Hawwas Auto Installer v0.3.1 installed.'
-say 'Restarting Enigma2 GUI to show the plugin list on TV.'
-say 'Use UP/DOWN, OK to toggle, GREEN to start.'
-say 'If it does not pop up, open Plugins -> H. Hawwas Auto Installer.'
+: > "$REQUEST"
+
+say "Hawwas Panel $VERSION installed/updated."
+say 'Restarting Enigma2 GUI once to load this version.'
+say 'Future launches of this version will not restart GUI.'
+say 'Remote: UP/DOWN, OK toggle, GREEN install.'
 
 nohup sh -c 'sleep 2; init 4; sleep 3; init 3' \
     > /home/root/hawwas-launch.log 2>&1 < /dev/null &
