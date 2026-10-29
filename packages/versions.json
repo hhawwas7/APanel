@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "ncam": {
+    "name": "NCam",
+    "package": "enigma2-plugin-softcams-ncam",
+    "version": "V15.8-r0",
+    "architecture": "all",
+    "file": "packages/ncam/current.ipk",
+    "sha256": "2b329b82b8bf672a5ef30ac112bf93a05ea458520e63366b61f10577d6324fc2",
+    "source_url": "https://raw.githubusercontent.com/biko-73/Ncam_EMU/main/enigma2-plugin-softcams-ncam_V15.8-r0_all.ipk"
+  },
+  "oscam": {
+    "name": "OSCam",
+    "package": "enigma2-plugin-softcams-oscam-emu-pcsc-levi45",
+    "version": "11968-803",
+    "architecture": "all",
+    "file": "packages/oscam/current.ipk",
+    "sha256": "90f08d197025e9ea13905255e5811bb909b20616ae8962ae1d5d2674ad1b675c",
+    "source_url": "https://raw.githubusercontent.com/levi-45/Levi45Emulator/main/enigma2-plugin-softcams-oscam-emu-pcsc-levi45_11968-803_all.ipk"
+  }
+}
