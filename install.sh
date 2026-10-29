@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.16 - OpenATV Enigma2 TV installer / uninstaller
+# A Panel v0.4.17 - OpenATV Enigma2 TV installer / uninstaller
 # OpenATV / opkg only. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.16
+VERSION=v0.4.17
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -32015,7 +32015,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.16 — OpenATV / Enigma2
+# A Panel v0.4.17 — OpenATV / Enigma2
 from __future__ import absolute_import
 
 import os
@@ -32032,7 +32032,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.16'
+VERSION = 'v0.4.17'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. Hamada Hawwas'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -32172,16 +32172,16 @@ def bgname(w):
 
 # One continuous grid; category shortcuts never filter or toggle selection.
 CARD_W, CARD_H = 130, 112
-GAP_X, GAP_Y, HEADING_H = 20, 18, 0
+GAP_X, GAP_Y, HEADING_H = 20, 10, 0
 GRID_COLS = 8
 LEFT_MARGIN = (1280 - (GRID_COLS * CARD_W + (GRID_COLS - 1) * GAP_X)) // 2
-VIEW_TOP, VIEW_BOTTOM = 166, 556
+VIEW_TOP, VIEW_BOTTOM = 142, 630
 VIEW_HEIGHT = VIEW_BOTTOM - VIEW_TOP
 DISPLAY_GROUP_ORDER = ('Panels', 'Audio', 'Media', 'Feed Hunters', 'EPG',
                        'Subtitles', 'Skins', 'EMUs', 'Other Plugins')
 TAB_LABELS = ('Panels', 'Audio', 'Media', 'Feeds', 'EPG',
               'Subtitles', 'Skins', 'EMUs', 'Others')
-TAB_LEFT, TAB_TOP, TAB_W, TAB_H, TAB_GAP = 50, 94, 124, 46, 8
+TAB_LEFT, TAB_TOP, TAB_W, TAB_H, TAB_GAP = 50, 73, 124, 36, 8
 
 
 def sections_layout(visible_keys=None):
@@ -32207,39 +32207,22 @@ def picker_skin():
     w,h,f,ox,oy=geometry()
     s=['<screen name="APanelGrid" position="0,0" size="%d,%d" flags="wfNoBorder" backgroundColor="#08131c">'%(w,h)]
     s.append('<ePixmap position="0,0" size="%d,%d" pixmap="%s" scale="1" alphatest="blend" zPosition="-20" />'%(w,h,bgname(w)))
-    # Distinct two-tone header, with a compact wordmark and gold accent.
-    hx,hy=coords(24,7,f,ox,oy)
+    hx,hy=coords(24,4,f,ox,oy)
     s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="#12242b" zPosition="1" />'%(
-        hx,hy,int(round(1230*f)),int(round(72*f))))
-    hx,hy=coords(24,7,f,ox,oy)
-    s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="#173848" zPosition="2" />'%(
-        hx,hy,int(round(252*f)),int(round(70*f))))
-    hx,hy=coords(33,20,f,ox,oy)
-    s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="#d6b875" zPosition="3" />'%(
-        hx,hy,max(2,round(3*f)),int(round(43*f))))
-    hx,hy=coords(26,77,f,ox,oy)
+        hx,hy,int(round(1230*f)),int(round(59*f))))
+    hx,hy=coords(26,63,f,ox,oy)
     s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="#415b64" zPosition="2" />'%(
-        hx,hy,int(round(1224*f)),max(1,round(2*f))))
-    hx,hy=coords(31,77,f,ox,oy)
-    s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="#cfab6c" zPosition="3" />'%(
-        hx,hy,int(round(275*f)),max(1,round(2*f))))
-    s.append(box('heading',48,12,52,55,f,ox,oy,
-                 font=UI_FONT+';%d'%round(45*f),foregroundColor='#f0cf88',
-                 transparent='1',valign='center',zPosition='5'))
-    s.append(box('wordmark',106,15,162,35,f,ox,oy,
-                 font=UI_FONT+';%d'%round(31*f),foregroundColor='#edf5f6',
-                 transparent='1',valign='center',zPosition='5'))
-    s.append(box('header_version',108,51,155,18,f,ox,oy,
-                 font=UI_FONT+';%d'%round(12*f),foregroundColor='#b9d1d8',
-                 transparent='1',valign='center',zPosition='5'))
-    s.append(box('author',292,18,442,48,f,ox,oy,
-                 font='Regular;%d'%round(27*f),foregroundColor='#d0e4ee',
-                 transparent='1',valign='center',zPosition='5'))
-    s.append(box('selected_count',821,18,210,45,f,ox,oy,
+        hx,hy,int(round(1224*f)),max(1,round(f))))
+    s.append(box('brandlogo',32,7,135,54,f,ox,oy,
+                 transparent='1',alphatest='blend',scale='1',zPosition='5'))
+    s.append(box('author',200,12,540,40,f,ox,oy,
+                 font=UI_FONT+';%d'%round(25*f),foregroundColor='#d0e4ee',
+                 transparent='1',valign='center',shadowOffset='0,0',borderWidth='0',zPosition='5'))
+    s.append(box('selected_count',821,14,210,36,f,ox,oy,
                  font=UI_FONT+';%d'%round(20*f),foregroundColor='#a2ffcf',
                  backgroundColor='#163c35',borderWidth='0',shadowOffset='0,0',
                  halign='center',valign='center',zPosition='5'))
-    s.append(box('plugins_count',1055,18,181,45,f,ox,oy,
+    s.append(box('plugins_count',1055,14,181,36,f,ox,oy,
                  font=UI_FONT+';%d'%round(20*f),foregroundColor='#c5e8ff',
                  backgroundColor='#173348',borderWidth='0',shadowOffset='0,0',
                  halign='center',valign='center',zPosition='5'))
@@ -32251,11 +32234,8 @@ def picker_skin():
                      shadowOffset='0,0',
                      backgroundColor='#102631',borderWidth='0',
                      halign='center',valign='center',zPosition='5'))
-    s.append(box('detection',36,558,1208,27,f,ox,oy,
+    s.append(box('detection',50,112,1180,24,f,ox,oy,
                  font=UI_FONT+';%d'%round(15*f),foregroundColor='#a9c9d4',
-                 transparent='1',halign='center',valign='center',zPosition='5'))
-    s.append(box('navhint',36,585,1208,40,f,ox,oy,
-                 font='Regular;%d'%round(18*f),foregroundColor='#9db8c7',
                  transparent='1',halign='center',valign='center',zPosition='5'))
     for i,item in enumerate(CARDS):
         s.append(box('tile%d'%i,0,105,CARD_W,CARD_H,f,ox,oy,
@@ -32279,11 +32259,11 @@ def picker_skin():
         *coords(25,651,f,ox,oy),int(round(1230*f)),int(round(62*f))))
     foot=[
         ('redkey',36,184,'#d72e39','#ffffff'),
-        ('greenkey',232,184,'#129b5b','#ffffff'),
+        ('greenkey',232,184,'#79c793','#10251b'),
         ('yellowkey',428,184,'#eec126','#14171b'),
         ('bluekey',624,184,'#257fe6','#ffffff'),
         ('menukey',820,190,'#f3f5f7','#17222d'),
-        ('infokey',1023,215,'#f3f5f7','#17222d'),
+        ('infokey',1023,215,'#343d47','#f2f4f6'),
     ]
     for key,x,ww,bgcolor,textcolor in foot:
         bx,by=coords(x,661,f,ox,oy)
@@ -32292,11 +32272,11 @@ def picker_skin():
         if key == 'menukey':
             s.append(box(key,x+46,661,ww-52,43,f,ox,oy,
                          font='Regular;%d'%round(19*f),foregroundColor=textcolor,
-                         shadowColor='#14212d',shadowOffset='1,1',transparent='1',halign='center',valign='center',zPosition='5'))
+                         borderWidth='0',shadowOffset='0,0',transparent='1',halign='center',valign='center',zPosition='5'))
         else:
             s.append(box(key,x,661,ww,43,f,ox,oy,
                          font='Regular;%d'%round((18 if key=='infokey' else 22)*f),foregroundColor=textcolor,
-                         shadowColor='#14212d',shadowOffset='1,1',transparent='1',halign='center',valign='center',zPosition='5'))
+                         borderWidth='0',shadowOffset='0,0',transparent='1',halign='center',valign='center',zPosition='5'))
     for symbol,x in [('trash',845)]:
         s.append(box(symbol+'icon',x,671,25,25,f,ox,oy,
                      transparent='1',alphatest='blend',scale='1',zPosition='6'))
@@ -32324,7 +32304,7 @@ class GridPicker(Screen):
         self.default_allowed = set(self.allowed)
         if not is_one():
             self.default_allowed.discard('audioshift')
-        self.checked = set(self.default_allowed) if mode == 'install' else set()
+        self.checked = set()
         self.cursor = 0
         self.offset = 0
         self.tab_focus = False
@@ -32336,9 +32316,7 @@ class GridPicker(Screen):
         self.virtual_height = VIRTUAL_HEIGHT
         self.package_query_ok = False
         self._package_names = set()
-        self['heading'] = Label('A')
-        self['wordmark'] = Label('PANEL')
-        self['header_version'] = Label(VERSION + (' / REMOVE' if mode=='uninstall' else ''))
+        self['brandlogo'] = Pixmap()
         self['author'] = Label('Mr. Hamada Hawwas')
         self['selected_count'] = Label('')
         self['plugins_count'] = Label('')
@@ -32346,7 +32324,6 @@ class GridPicker(Screen):
         for i, label in enumerate(TAB_LABELS):
             self['tab%d'%i] = Label('%d %s'%(i+1,label))
         self['detection'] = Label('')
-        self['navhint'] = Label('1-9: Jump to category   |   UP from first row: Categories   |   OK: Select')
         for i, item in enumerate(CARDS):
             for prefix, cls in (('tile',Label),('icon',Pixmap),('name',Label),('tick',Label)):
                 self['%s%d'%(prefix,i)] = cls() if prefix != 'tile' else cls('')
@@ -32398,7 +32375,7 @@ class GridPicker(Screen):
                 self.evidence[key] = 'Package database unavailable; installation could not be verified'
 
     def on_ready(self):
-        for key, filename in (('trashicon','controls/trash.png'),):
+        for key, filename in (('trashicon','controls/trash.png'),('brandlogo','plugin.png')):
             try:
                 self[key].instance.setPixmapFromFile(ASSETS+'/'+filename)
             except Exception:
@@ -32408,9 +32385,8 @@ class GridPicker(Screen):
                  [k for k in ALL_KEYS if self.states[k]=='Installed'])
         self.entries, self.layout_headers, self.virtual_height = sections_layout(keys)
         self.cursor = 0
-        if self.mode=='uninstall':
-            self['navhint'].setText('Detected on this receiver, including installs outside A Panel. GREEN: Remove')
-            self.checked = set()
+        self.checked = (set(k for k in self.default_allowed if self.states.get(k)=='Not Installed')
+                        if self.mode=='install' else set())
         for i,item in enumerate(CARDS):
             try:
                 self['icon%d'%i].instance.setPixmapFromFile(ASSETS+'/icons/'+item['key']+'.png')
@@ -32451,7 +32427,7 @@ class GridPicker(Screen):
             try:
                 tab = self['tab%d'%i].instance
                 tab.setBackgroundColor(parseColor('#e6b944' if focused else '#21483e' if current else '#102631'))
-                tab.setForegroundColor(parseColor('#15202a' if focused else '#c5e8d5' if current else '#c8dce5' if title in available else '#657781'))
+                tab.setForegroundColor(parseColor('#15202a' if focused else '#eef3f5' if current else '#c8dce5' if title in available else '#657781'))
                 tab.setBorderColor(parseColor('#ffe08b' if focused else '#63deb0' if current else '#345362'))
                 tab.setBorderWidth(0)
             except Exception:
@@ -32546,7 +32522,8 @@ class GridPicker(Screen):
         self.draw()
 
     def all(self):
-        self.checked=set(card['key'] for card in self.entries if self.mode=='uninstall' or card['key'] in self.allowed)
+        self.checked=set(card['key'] for card in self.entries if self.mode=='uninstall' or
+                         (card['key'] in self.allowed and self.states.get(card['key'])=='Not Installed'))
         self.draw()
 
     def none(self):
