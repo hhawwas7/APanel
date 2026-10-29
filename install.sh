@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.15 - OpenATV Enigma2 TV installer / uninstaller
+# A Panel v0.4.16 - OpenATV Enigma2 TV installer / uninstaller
 # OpenATV / opkg only. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.15
+VERSION=v0.4.16
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -32015,7 +32015,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.15 — OpenATV / Enigma2
+# A Panel v0.4.16 — OpenATV / Enigma2
 from __future__ import absolute_import
 
 import os
@@ -32032,7 +32032,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.15'
+VERSION = 'v0.4.16'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. Hamada Hawwas'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -32237,11 +32237,11 @@ def picker_skin():
                  transparent='1',valign='center',zPosition='5'))
     s.append(box('selected_count',821,18,210,45,f,ox,oy,
                  font=UI_FONT+';%d'%round(20*f),foregroundColor='#a2ffcf',
-                 backgroundColor='#163c35',borderColor='#2e705b',borderWidth=str(max(1,round(f))),
+                 backgroundColor='#163c35',borderWidth='0',shadowOffset='0,0',
                  halign='center',valign='center',zPosition='5'))
     s.append(box('plugins_count',1055,18,181,45,f,ox,oy,
                  font=UI_FONT+';%d'%round(20*f),foregroundColor='#c5e8ff',
-                 backgroundColor='#173348',borderColor='#345d78',borderWidth=str(max(1,round(f))),
+                 backgroundColor='#173348',borderWidth='0',shadowOffset='0,0',
                  halign='center',valign='center',zPosition='5'))
     # Single full-width board. NO central divider / independent half-columns.
     s.append(box('bar',16,88,1248,555,f,ox,oy,zPosition='1',transparent='1'))
@@ -32249,7 +32249,7 @@ def picker_skin():
         s.append(box('tab%d'%i,TAB_LEFT+i*(TAB_W+TAB_GAP),TAB_TOP,TAB_W,TAB_H,f,ox,oy,
                      font=UI_FONT+';%d'%round(18*f),foregroundColor='#c8dce5',
                      shadowOffset='0,0',
-                     backgroundColor='#102631',borderColor='#345362',borderWidth='1',
+                     backgroundColor='#102631',borderWidth='0',
                      halign='center',valign='center',zPosition='5'))
     s.append(box('detection',36,558,1208,27,f,ox,oy,
                  font=UI_FONT+';%d'%round(15*f),foregroundColor='#a9c9d4',
@@ -32308,9 +32308,9 @@ def simple_skin(title):
     w,h,f,ox,oy=geometry()
     s=['<screen name="APanelDialog" position="0,0" size="%d,%d" flags="wfNoBorder" backgroundColor="#09141e">'%(w,h)]
     s.append('<ePixmap position="0,0" size="%d,%d" pixmap="%s" alphatest="blend" scale="1" zPosition="-20" />'%(w,h,bgname(w)))
-    s.append(box('heading',44,94,1170,58,f,ox,oy,font='Regular;%d'%round(28*f),foregroundColor='#f8c771',backgroundColor='#091721'))
-    s.append(box('status',44,170,1170,410,f,ox,oy,font='Regular;%d'%round(22*f),foregroundColor='#ffffff',backgroundColor='#0b1b25',borderColor='#37909c',borderWidth=str(max(2,round(2*f)))))
-    s.append(box('footer',44,630,1170,55,f,ox,oy,font='Regular;%d'%round(19*f),foregroundColor='#75f1b8',backgroundColor='#091721'))
+    s.append(box('heading',44,94,1170,58,f,ox,oy,font=UI_FONT+';%d'%round(28*f),foregroundColor='#f8c771',backgroundColor='#091721',borderWidth='0',shadowOffset='0,0'))
+    s.append(box('status',44,170,1170,410,f,ox,oy,font=UI_FONT+';%d'%round(22*f),foregroundColor='#ffffff',backgroundColor='#0b1b25',borderWidth='0',shadowOffset='0,0'))
+    s.append(box('footer',44,630,1170,55,f,ox,oy,font=UI_FONT+';%d'%round(19*f),foregroundColor='#75f1b8',backgroundColor='#091721',borderWidth='0',shadowOffset='0,0'))
     s.append('</screen>')
     return '\n'.join(s)
 
@@ -32453,7 +32453,7 @@ class GridPicker(Screen):
                 tab.setBackgroundColor(parseColor('#e6b944' if focused else '#21483e' if current else '#102631'))
                 tab.setForegroundColor(parseColor('#15202a' if focused else '#c5e8d5' if current else '#c8dce5' if title in available else '#657781'))
                 tab.setBorderColor(parseColor('#ffe08b' if focused else '#63deb0' if current else '#345362'))
-                tab.setBorderWidth(max(1,round((2 if focused or current else 1)*self._f)))
+                tab.setBorderWidth(0)
             except Exception:
                 pass
         by_key={card['key']:card for card in self.entries}
@@ -32781,7 +32781,7 @@ def open_plugin(session,**kwargs):
 
 
 def Plugins(**kwargs):
-    return [PluginDescriptor(name='A Panel',description='Mr. Hamada Hawwas',
+    return [PluginDescriptor(name='APanel',description='Mr. Hamada Hawwas',
             icon='plugin.png',where=PluginDescriptor.WHERE_PLUGINMENU,fnc=open_plugin),
             PluginDescriptor(where=PluginDescriptor.WHERE_SESSIONSTART,fnc=session_start)]
 
