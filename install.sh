@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.20 - OpenATV Enigma2 TV installer / uninstaller
+# A Panel v0.4.21 - OpenATV Enigma2 TV installer / uninstaller
 # OpenATV / opkg only. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.20
+VERSION=v0.4.21
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -37654,7 +37654,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.20 — OpenATV / Enigma2
+# A Panel v0.4.21 — OpenATV / Enigma2
 from __future__ import absolute_import
 
 import os
@@ -37671,7 +37671,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.20'
+VERSION = 'v0.4.21'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. Hamada Hawwas'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -38081,16 +38081,16 @@ class GridPicker(Screen):
             files = [p for p in PLUGIN_PATHS.get(key,[]) if program_present(p)]
             if packages:
                 self.states[key] = 'Installed'
-                self.evidence[key] = 'Installed package: ' + ', '.join(packages)
+                self.evidence[key] = 'Installed'
             elif files:
                 self.states[key] = 'Installed'
-                self.evidence[key] = 'Program files detected; no matching package record'
+                self.evidence[key] = 'Installed'
             elif self.package_query_ok:
                 self.states[key] = 'Not Installed'
-                self.evidence[key] = 'Not detected on this receiver'
+                self.evidence[key] = 'Not Installed'
             else:
                 self.states[key] = 'Needs Verification'
-                self.evidence[key] = 'Package database unavailable; installation could not be verified'
+                self.evidence[key] = 'Unable to verify'
 
     def on_ready(self):
         for key, filename in (('trashicon','controls/trash.png'),('brandlogo','plugin.png')):
@@ -38137,8 +38137,8 @@ class GridPicker(Screen):
         if getattr(self,'intro_active',False):
             self['detection'].setText(DEFAULT_NOTICE)
         else:
-            self['detection'].setText((NAMES[selected['key']].replace('\n',' ') + ' | ' + self.evidence.get(selected['key'],''))
-                if selected else 'No supported plugins detected on this receiver.')
+            self['detection'].setText(self.evidence.get(selected['key'],'Unable to verify')
+                if selected else 'No plugins found')
         if selected:
             cy=selected['y']
             if cy+CARD_H>self.offset+VIEW_HEIGHT:
