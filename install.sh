@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.19 - OpenATV Enigma2 TV installer / uninstaller
+# A Panel v0.4.20 - OpenATV Enigma2 TV installer / uninstaller
 # OpenATV / opkg only. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.19
+VERSION=v0.4.20
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -37654,7 +37654,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.19 — OpenATV / Enigma2
+# A Panel v0.4.20 — OpenATV / Enigma2
 from __future__ import absolute_import
 
 import os
@@ -37671,7 +37671,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.19'
+VERSION = 'v0.4.20'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. Hamada Hawwas'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -38045,7 +38045,7 @@ class GridPicker(Screen):
             ('redkey','EXIT'),
             ('greenkey','INSTALL' if mode=='install' else 'REMOVE'),
             ('yellowkey','ALL'),('bluekey','NONE'),
-            ('menukey','MENU' if mode=='install' else 'BACK'),('infokey','INFO: HELP')):
+            ('menukey','MENU' if mode=='install' else 'BACK'),('infokey','INFO')):
             self[key]=Label(text)
         self['trashicon']=Pixmap()
         self['actions']=ActionMap(
@@ -38377,42 +38377,38 @@ def version_tuple(v):
     return tuple(int(s) for s in parts[:4])
 
 
-HELP_PAGES = (
-    "\n".join((
-        'ما هو APanel؟',
-        'أداة لتجهيز الريسيفر بسهولة بعد تثبيت صورة جديدة.',
-        'يجمع أوامر المطورين، ويستخدم فيد الصورة ومصادر المشاريع الأصلية.',
-        'اختر ما تحتاجه، ثم اضغط الأخضر لتثبيت اختياراتك دفعة واحدة.',
-        'الاختيارات المبدئية قابلة للتعديل، ولا تعبر عن أفضلية بلجن على آخر.',
-        'راجعها قبل التثبيت؛ بعض البلجنات تقدم وظائف متشابهة.',
-        'البلجن المثبت لا يحدد تلقائيًا؛ اختره بـ OK إذا أردت إعادة تثبيته.',
-        'تستمر المهمة في الخلفية عند إغلاق شاشة التقدم أو جلسة Telnet.',
-        'يأتي AJ Panel أولًا عند اختياره، ثم NCam وOSCam في نهاية التثبيت.',
-        'بعد انتهاء الدفعة، يعيد الريسيفر تشغيل نفسه بالكامل.',
-    )),
-    "\n".join((
-        'التحكم بالريموت',
-        'الأرقام 1–9: الانتقال مباشرة إلى أول بلجن في التصنيف المقابل.',
-        '\u200e1 Panels | 2 Audio | 3 Media | 4 Feeds | 5 EPG',
-        '\u200e6 Subtitles | 7 Skins | 8 EMUs | 9 Others',
-        'الأسهم: تنقل بين الكروت والتابات؛ OK: تحديد أو إلغاء الاختيار.',
-        'الأخضر: تنفيذ التثبيت، أو الإزالة داخل شاشة MENU.',
-        'الأصفر: اختيار كل غير المثبتة؛ الأزرق: إلغاء كل الاختيارات.',
-        'MENU: إدارة الإزالة؛ INFO: فتح هذا الدليل.',
-        'الأحمر أو EXIT: الرجوع أو إغلاق الشاشة.',
-    )),
-    "\n".join((
-        'التحديث والشكر',
-        'الزر الأخضر هنا يفتح فحص تحديث البانل.',
-        'يعرض الفحص النسخة المثبتة ونسخة الخادم قبل أي تثبيت.',
-        'إذا توفر إصدار أحدث، اضغط الأخضر ثم وافق على التأكيد.',
-        'تحديث البانل لا يعيد تثبيت البلجنات الموجودة على الجهاز.',
-        'خالص الشكر والتقدير لمطوري البلجنات على أعمالهم وإبداعهم.',
-        'تعود حقوق البلجنات وأوامرها وأدواتها إلى أصحابها الأصليين.',
-        'دور APanel هو جمع هذه الوسائل وتسهيل استخدامها من مكان واحد.',
-        'الإزالة التلقائية متاحة للبلجنات والنسخ المدعومة في البانل.',
-    )),
+HELP_POINTS = (
+    '• أداة لتجهيز الريسيفر بسهولة بعد تثبيت صورة جديدة.',
+    '• تجمع أوامر المطورين لتثبيت اختياراتك بضغطة واحدة.',
+    '• راجع اختياراتك؛ بعض البلجنات تقدم وظائف متشابهة.',
+    '• الأرقام من ١ إلى ٩ تنقلك لأول بلجن في التصنيف.',
+    '• الزر الأخضر: تنفيذ التثبيت.',
+    '• الزر الأصفر: تحديد كل البلجنات غير المثبتة.',
+    '• الزر الأزرق: إلغاء كل الاختيارات.',
+    '• زر القائمة: اختيار البلجنات المطلوب إزالتها.',
+    '• كل الشكر والتقدير للمطورين؛ الحقوق محفوظة لأصحابها.',
 )
+ARABIC_LINE_COUNT = 10
+
+
+def arabic_version(version):
+    return (version or '').lstrip('v').translate(str.maketrans('0123456789', '٠١٢٣٤٥٦٧٨٩'))
+
+
+class ArabicLines:
+    # A separate native label for each line prevents Enigma2 bidi processing
+    # from reordering a whole multiline paragraph on some receiver images.
+    def __init__(self,screen):
+        self.screen=screen
+        self.text=''
+        for i in range(ARABIC_LINE_COUNT):
+            screen['line%d'%i]=Label('')
+
+    def setText(self,text):
+        self.text=text
+        lines=text.splitlines()
+        for i in range(ARABIC_LINE_COUNT):
+            self.screen['line%d'%i].setText(lines[i] if i<len(lines) else '')
 
 
 def arabic_info_skin(name):
@@ -38427,14 +38423,13 @@ def arabic_info_skin(name):
                  font=HELP_FONT+';%d'%round(25*f),foregroundColor='#10251b',
                  backgroundColor='#79c793',halign='center',valign='center',
                  borderWidth='0',shadowOffset='0,0'))
-    s.append(box('status',56,158,1168,440,f,ox,oy,
-                 font=HELP_FONT+';%d'%round(24*f),foregroundColor='#ffffff',
-                 backgroundColor='#0b1b25',halign='right',valign='top',
-                 borderWidth='0',shadowOffset='0,0'))
-    s.append(box('footer',44,622,1192,65,f,ox,oy,
-                 font=HELP_FONT+';%d'%round(22*f),foregroundColor='#bdd3dc',
-                 backgroundColor='#091721',halign='right',valign='center',
-                 borderWidth='0',shadowOffset='0,0'))
+    bx,by=coords(56,158,f,ox,oy)
+    s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="#0b1b25" zPosition="1" />'%(bx,by,round(1168*f),round(440*f)))
+    for i in range(ARABIC_LINE_COUNT):
+        s.append(box('line%d'%i,68,160+i*43,1144,43,f,ox,oy,
+                     font=HELP_FONT+';%d'%round(24*f),foregroundColor='#ffffff',
+                     transparent='1',halign='right',valign='center',
+                     borderWidth='0',shadowOffset='0,0'))
     s.append('</screen>')
     return '\n'.join(s)
 
@@ -38443,38 +38438,27 @@ class InfoScreen(Screen):
     def __init__(self,session):
         Screen.__init__(self,session)
         self.skin=arabic_info_skin('APanelHelp')
-        self.page=0
-        self['heading']=Label('دليل APanel وطريقة الاستخدام')
-        self['actionkey']=Label('الأخضر: تحديث البانل')
-        self['status']=Label('')
-        self['footer']=Label('')
-        self['actions']=ActionMap(['OkCancelActions','DirectionActions','ColorActions'],
-            {'up':lambda:self.move_page(-1),'left':lambda:self.move_page(-1),
-             'down':lambda:self.move_page(1),'right':lambda:self.move_page(1),
-             'ok':lambda:self.move_page(1),'green':self.open_updates,
+        self['heading']=Label('ما هو البانل؟')
+        self['actionkey']=Label('تحديث البانل')
+        self.body=ArabicLines(self)
+        self.body.setText('\n'.join(HELP_POINTS))
+        self['actions']=ActionMap(['OkCancelActions','ColorActions'],
+            {'ok':self.close,'green':self.open_updates,
              'red':self.close,'cancel':self.close},-1)
-        self.show_page()
-
-    def move_page(self,delta):
-        self.page=(self.page+delta)%len(HELP_PAGES)
-        self.show_page()
-
-    def show_page(self):
-        self['status'].setText(HELP_PAGES[self.page])
-        self['footer'].setText('صفحة %d من %d  |  أعلى/أسفل: تصفح  |  OK: التالي  |  أحمر: رجوع'%(self.page+1,len(HELP_PAGES)))
 
     def open_updates(self):
         self.session.open(UpdateScreen)
+
 
 
 class UpdateScreen(Screen):
     def __init__(self,session):
         Screen.__init__(self,session)
         self.skin=arabic_info_skin('APanelUpdates')
-        self['heading']=Label('تحديث APanel')
-        self['status']=Label('النسخة المثبتة: %s\nنسخة الخادم: جارٍ الفحص...\n\nيرجى الانتظار حتى ينتهي فحص التحديث.'%VERSION)
+        self['heading']=Label('تحديث البانل')
+        self.body=ArabicLines(self)
+        self.body.setText('النسخة المثبتة: %s\nنسخة الخادم: جارٍ الفحص...\n\nيرجى الانتظار حتى ينتهي فحص التحديث.'%arabic_version(VERSION))
         self['actionkey']=Label('جارٍ فحص التحديث')
-        self['footer']=Label('الأخضر: تثبيت التحديث عند توفره  |  الأحمر: رجوع')
         self['actions']=ActionMap(['OkCancelActions','ColorActions'],
             {'green':self.want_update,'red':self.close,'cancel':self.close},-1)
         self.timer=eTimer()
@@ -38491,7 +38475,7 @@ class UpdateScreen(Screen):
         if self.checked_once:return
         self.checked_once=True
         if active():
-            self['status'].setText('هناك عملية تثبيت أو إزالة قيد التنفيذ.\nيمكن فحص التحديث بعد انتهائها.')
+            self.body.setText('هناك عملية تثبيت أو إزالة قيد التنفيذ.\nيمكن فحص التحديث بعد انتهائها.')
             self['actionkey'].setText('انتظر انتهاء المهمة')
             return
         try:
@@ -38500,14 +38484,14 @@ class UpdateScreen(Screen):
                 stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             self.timer.start(1200,False)
         except Exception as error:
-            self['status'].setText('تعذر بدء فحص التحديث.\n%s'%error)
+            self.body.setText('تعذر بدء فحص التحديث.\nيرجى المحاولة مرة أخرى.')
             self['actionkey'].setText('تعذر فحص التحديث')
 
     def poll(self):
         if self.proc is None or self.proc.poll() is None:return
         self.timer.stop()
         if self.proc.returncode!=0:
-            self['status'].setText('تعذر الوصول إلى نسخة الخادم.\nتحقق من اتصال الإنترنت ثم افتح الفحص مرة أخرى.')
+            self.body.setText('تعذر الوصول إلى نسخة الخادم.\nتحقق من اتصال الإنترنت ثم افتح الفحص مرة أخرى.')
             self['actionkey'].setText('تعذر فحص التحديث')
             return
         try:
@@ -38517,22 +38501,22 @@ class UpdateScreen(Screen):
             match=re.search(rb'(?m)^VERSION=(v[0-9][0-9.]*)\s*$',src)
             if not match:raise ValueError('Version not found')
             self.remote_version=match.group(1).decode('ascii')
-            versions='النسخة المثبتة: \u200e%s\u200e\nنسخة الخادم: \u200e%s\u200e\n\n'%(VERSION,self.remote_version)
+            versions='النسخة المثبتة: %s\nنسخة الخادم: %s\n\n'%(arabic_version(VERSION),arabic_version(self.remote_version))
             if version_tuple(self.remote_version)>version_tuple(VERSION):
                 self.ready=True
-                self['status'].setText(versions+'يتوفر إصدار أحدث من البانل.\nاضغط الأخضر ثم أكد رغبتك في التحديث.\n\nيتم تحديث البانل فقط؛ لا يعاد تثبيت البلجنات.\nستعاد واجهة Enigma2 مرة واحدة بعد اكتمال التحديث.')
-                self['actionkey'].setText('الأخضر: تثبيت التحديث')
+                self.body.setText(versions+'يتوفر إصدار أحدث من البانل.\nاضغط الأخضر ثم أكد رغبتك في التحديث.\n\nيتم تحديث البانل فقط؛ لا يعاد تثبيت البلجنات.\nستعاد الواجهة مرة واحدة بعد اكتمال التحديث.')
+                self['actionkey'].setText('تثبيت التحديث')
             else:
-                self['status'].setText(versions+'أنت تستخدم أحدث إصدار متاح من البانل.\nلا يوجد تحديث أحدث للتثبيت.')
+                self.body.setText(versions+'أنت تستخدم أحدث إصدار متاح من البانل.\nلا يوجد تحديث أحدث للتثبيت.')
                 self['actionkey'].setText('البانل محدّث')
         except Exception as error:
-            self['status'].setText('تعذر التحقق من بيانات التحديث.\n%s'%error)
+            self.body.setText('تعذر التحقق من بيانات التحديث.\nيرجى المحاولة مرة أخرى.')
             self['actionkey'].setText('تعذر التحقق من النسخة')
 
     def want_update(self):
         if not self.ready or active():return
         self.session.openWithCallback(self.start_update,MessageBox,
-            'تحديث البانل من %s إلى %s؟\nستعاد واجهة Enigma2 مرة واحدة بعد التحديث.\nلن يعاد تثبيت البلجنات.'%(VERSION,self.remote_version),
+            'هل تريد تحديث البانل من %s إلى %s؟'%(arabic_version(VERSION),arabic_version(self.remote_version)),
             MessageBox.TYPE_YESNO,default=False)
 
     def start_update(self,confirmed):
@@ -38545,11 +38529,11 @@ class UpdateScreen(Screen):
                 subprocess.Popen(['/bin/sh',UPDATE_FILE],stdin=subprocess.DEVNULL,
                     stdout=logfile,stderr=subprocess.STDOUT,close_fds=True,start_new_session=True)
             finally:logfile.close()
-            self['status'].setText('بدأ تحديث البانل.\nستعاد الواجهة تلقائيًا عند اكتمال التثبيت.')
+            self.body.setText('بدأ تحديث البانل.\nستعاد الواجهة تلقائيًا عند اكتمال التثبيت.')
             self['actionkey'].setText('جارٍ تحديث البانل')
             self.ready=False
         except Exception as error:
-            self['status'].setText('تعذر بدء تثبيت التحديث.\n%s'%error)
+            self.body.setText('تعذر بدء تثبيت التحديث.\nيرجى المحاولة مرة أخرى.')
 
 
 
