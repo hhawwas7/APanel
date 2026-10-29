@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.13 - OpenATV Enigma2 TV installer / uninstaller
+# A Panel v0.4.14 - OpenATV Enigma2 TV installer / uninstaller
 # OpenATV / opkg only. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.13
+VERSION=v0.4.14
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -84,8 +84,84 @@ step() {
     bar
 }
 
+# Scope restart deferral to this installation worker and its child processes.
+# System executables are never replaced; unrelated receiver sessions are unaffected.
+begin_restart_guard() {
+    APANEL_GUARD_REAL_PATH=$PATH
+    APANEL_GUARD_DIR=$(mktemp -d /tmp/apanel-restart-guard.XXXXXX) || return 1
+    export APANEL_GUARD_REAL_PATH APANEL_GUARD_DIR
+    for GUARD_CMD in init telinit systemctl service killall pkill start-stop-daemon reboot shutdown halt poweroff busybox; do
+        GUARD_REAL=$(command -v "$GUARD_CMD" 2>/dev/null) || continue
+        case "$GUARD_REAL" in /*) : ;; *) continue ;; esac
+        printf '%s\n' "$GUARD_REAL" > "$APANEL_GUARD_DIR/real-$GUARD_CMD" || return 1
+    done
+    cat > "$APANEL_GUARD_DIR/dispatch" <<'APANEL_RESTART_GUARD'
+#!/bin/sh
+CMD=${0##*/}
+DEFER=0
+case "$CMD" in
+    reboot|shutdown|halt|poweroff) DEFER=1 ;;
+    init|telinit)
+        case "${1:-}" in 0|3|4|6) DEFER=1 ;; esac ;;
+    killall|pkill|start-stop-daemon)
+        for ARG in "$@"; do
+            case "$ARG" in enigma2|*/enigma2|'^enigma2$') DEFER=1 ;; esac
+        done ;;
+    systemctl|service)
+        TARGET=0
+        ACTION=0
+        for ARG in "$@"; do
+            case "$ARG" in enigma2|enigma2.service) TARGET=1 ;; esac
+            case "$ARG" in start|stop|restart|try-restart|reload|reload-or-restart|reload-or-try-restart|force-reload|kill) ACTION=1 ;; esac
+            case "$ARG" in reboot|poweroff|halt|isolate) DEFER=1 ;; esac
+        done
+        [ "$TARGET" = 1 ] && [ "$ACTION" = 1 ] && DEFER=1 ;;
+    busybox)
+        # Keep explicit 'busybox killall/reboot/...' inside the same guard.
+        APPLET=${1:-}
+        case "$APPLET" in init|telinit|killall|pkill|start-stop-daemon|reboot|shutdown|halt|poweroff)
+            if [ -x "$APANEL_GUARD_DIR/$APPLET" ]; then
+                shift
+                exec "$APANEL_GUARD_DIR/$APPLET" "$@"
+            fi ;;
+        esac ;;
+esac
+if [ "$DEFER" = 1 ]; then
+    printf '[A Panel] Deferred restart request: %s' "$CMD"
+    printf ' %s' "$@"
+    printf '\n'
+    exit 0
+fi
+IFS= read -r REAL < "$APANEL_GUARD_DIR/real-$CMD" || exit 127
+exec "$REAL" "$@"
+APANEL_RESTART_GUARD
+    chmod 700 "$APANEL_GUARD_DIR/dispatch" || return 1
+    for GUARD_FILE in "$APANEL_GUARD_DIR"/real-*; do
+        [ -f "$GUARD_FILE" ] || continue
+        GUARD_CMD=${GUARD_FILE##*/real-}
+        ln -s dispatch "$APANEL_GUARD_DIR/$GUARD_CMD" || return 1
+    done
+    PATH="$APANEL_GUARD_DIR:$APANEL_GUARD_REAL_PATH"
+    export PATH
+    trap 'end_restart_guard' 0
+    trap 'end_restart_guard; exit 1' HUP INT TERM
+    report 'Restart deferral active for this installation batch.'
+}
+
+end_restart_guard() {
+    if [ -n "${APANEL_GUARD_REAL_PATH:-}" ]; then
+        PATH=$APANEL_GUARD_REAL_PATH
+        export PATH
+    fi
+    case "${APANEL_GUARD_DIR:-}" in
+        /tmp/apanel-restart-guard.*) rm -rf "$APANEL_GUARD_DIR" ;;
+    esac
+    unset APANEL_GUARD_DIR APANEL_GUARD_REAL_PATH
+}
+
 remote() {
     URL=$1
+    shift
     FILE=/tmp/apanel-remote-$$.sh
     rm -f "$FILE"
     if ! wget -qO "$FILE" "$URL" || [ ! -s "$FILE" ]; then
@@ -93,7 +169,7 @@ remote() {
         rm -f "$FILE"
         return 1
     fi
-    bash "$FILE"
+    bash "$FILE" "$@"
     RC=$?
     rm -f "$FILE"
     return "$RC"
@@ -285,7 +361,7 @@ install_levi() {
 }
 
 install_audioshift() {
-    remote https://xfayez95.github.io/audioshift/installer.sh
+    remote https://xfayez95.github.io/audioshift/installer.sh --no-restart
 }
 
 install_mystreamer() {
@@ -335,7 +411,7 @@ install_plugin_key() {
         aglare)
             remote https://raw.githubusercontent.com/popking159/skins/refs/heads/main/aglareatv/installer.sh ;;
         livefeed)
-            remote https://live-feed.net/enigma2/installer.sh ;;
+            remote https://live-feed.net/enigma2/installer.sh --no-restart ;;
         epggrabber)
             install_epggrabber ;;
         xstreamity)
@@ -601,11 +677,17 @@ run_mode() {
     fi
 
     if [ "$MODE" = install ]; then
+        if ! begin_restart_guard; then
+            end_restart_guard
+            report 'FAILED: restart deferral could not be prepared; installation not started.'
+            rm -f "$PIDFILE"
+            return 1
+        fi
         report "A Panel $VERSION | Install mode | $TOTAL steps"
         step 'Update OpenATV feed' opkg update
         # Display order is alphabetic; install order is deliberate.
         # AJ Panel is first. MixAudio, NCam and OSCam are the last three.
-        # FuryBiss has an upstream GUI restart; its detached worker continues.
+        # Child installer restart commands are deferred until the final reboot.
         for K in aj subs transmission tmdb arabicsavior raed audioshift ipaudioplus ipaudio customcs aglare livefeed epggrabber xstreamity mystreamer moviesostende furybiss mixaudio ncam oscamlevi; do
             case " $SELECTED " in
                 *" $K "*) : ;;
@@ -637,6 +719,8 @@ run_mode() {
     sleep 5
     rm -f "$PIDFILE"
     if [ "$MODE" = install ]; then
+        # Restore real commands before issuing our single final receiver reboot.
+        end_restart_guard
         reboot
     else
         init 4
@@ -27136,7 +27220,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.13 — OpenATV / Enigma2
+# A Panel v0.4.14 — OpenATV / Enigma2
 from __future__ import absolute_import
 
 import os
@@ -27153,7 +27237,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.13'
+VERSION = 'v0.4.14'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. Hamada Hawwas'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -27310,76 +27394,34 @@ def bgname(w):
     return ASSETS + ('/background_1920.png' if w >= 1600 else '/background_1280.png')
 
 
-# Responsive compact 720p-first category flow, no fixed left/right halves.
-# Each group owns a complete rectangle. For a 5-plugin category, 3+2 occupy
-# a RESERVED 3-column/2-row rectangle; subsequent groups start after it.
-# Visual category order does not change the shell's installation order.
-CARD_W, CARD_H = 130, 94
-GAP_X, GAP_Y, HEADING_H = 8, 7, 26
-GROUP_GAP_X, GROUP_GAP_Y = 30, 32
-LEFT_MARGIN, RIGHT_LIMIT = 26, 1250
-VIEW_TOP, VIEW_BOTTOM = 95, 642
+# One continuous grid; category shortcuts never filter or toggle selection.
+CARD_W, CARD_H = 130, 112
+GAP_X, GAP_Y, HEADING_H = 20, 18, 0
+GRID_COLS = 8
+LEFT_MARGIN = (1280 - (GRID_COLS * CARD_W + (GRID_COLS - 1) * GAP_X)) // 2
+VIEW_TOP, VIEW_BOTTOM = 166, 556
 VIEW_HEIGHT = VIEW_BOTTOM - VIEW_TOP
-# Compact masonry-style category flow: each group reserves its own rectangle.
-# Short groups can sit underneath shorter neighbours, eliminating giant blank
-# shelves. EMUs intentionally appear last in the visual layout, while the
-# independent installer still installs MixAudio -> NCam -> OSCam at the end.
-CARD_W, CARD_H = 130, 94
-GAP_X, GAP_Y, HEADING_H = 8, 7, 26
-GROUP_GAP_X, GROUP_GAP_Y = 30, 30
-LEFT_MARGIN, RIGHT_LIMIT = 26, 1250
-VIEW_TOP, VIEW_BOTTOM = 95, 642
-VIEW_HEIGHT = VIEW_BOTTOM - VIEW_TOP
-DISPLAY_GROUP_ORDER = ('Panels', 'Audio', 'Media', 'Feed Hunters',
-                       'Subtitles', 'EPG', 'Other Plugins', 'Skins', 'EMUs')
-
-
-def section_cols(label, count):
-    if count <= 1: return 1
-    if label == 'Audio': return min(2, count)
-    if label == 'Media': return min(3, count)
-    return min(3, count)
+DISPLAY_GROUP_ORDER = ('Panels', 'Audio', 'Media', 'Feed Hunters', 'EPG',
+                       'Subtitles', 'Skins', 'EMUs', 'Other Plugins')
+TAB_LABELS = ('Panels', 'Audio', 'Media', 'Feeds', 'EPG',
+              'Subtitles', 'Skins', 'EMUs', 'Others')
+TAB_LEFT, TAB_TOP, TAB_W, TAB_H, TAB_GAP = 50, 94, 124, 46, 8
 
 
 def sections_layout(visible_keys=None):
     allowed = set(ALL_KEYS if visible_keys is None else visible_keys)
     grouped = dict(GROUPS)
-    cards, headers, occupied = [], [], []
+    cards = []
     for title in DISPLAY_GROUP_ORDER:
-        keys = [key for key in grouped.get(title, ()) if key in allowed]
-        if not keys: continue
-        cols = section_cols(title,len(keys))
-        group_w = cols * CARD_W + (cols - 1) * GAP_X
-        rows = (len(keys)+cols-1)//cols
-        group_h = HEADING_H + rows * CARD_H + max(0,rows-1) * GAP_Y
-        # Candidate corners arise from previous group boundaries. Prefer the
-        # highest free location, then leftmost. This is a bounded 2D packer,
-        # not a fixed two-column board or a simple row shelf.
-        xs = sorted(set([LEFT_MARGIN] + [xx+ww+GROUP_GAP_X for xx,yy,ww,hh in occupied]))
-        ys = sorted(set([0] + [yy+hh+GROUP_GAP_Y for xx,yy,ww,hh in occupied]))
-        places=[]
-        for y in ys:
-            for x in xs:
-                if x+group_w > RIGHT_LIMIT: continue
-                if any(x < xx+ww+GROUP_GAP_X and x+group_w+GROUP_GAP_X > xx
-                       and y < yy+hh+GROUP_GAP_Y and y+group_h+GROUP_GAP_Y > yy
-                       for xx,yy,ww,hh in occupied):
-                    continue
-                places.append((y,x))
-        if not places:
-            y=max([yy+hh+GROUP_GAP_Y for xx,yy,ww,hh in occupied] or [0])
-            x=LEFT_MARGIN
-        else:
-            y,x=min(places)
-        occupied.append((x,y,group_w,group_h))
-        headers.append((title,x,y,group_w))
-        for j,key in enumerate(keys):
-            col,row=j%cols,j//cols
-            cards.append({'key':key,'x':x+col*(CARD_W+GAP_X),
-                          'y':y+HEADING_H+row*(CARD_H+GAP_Y),
-                          'row':row})
-    height=max((y+h for x,y,w,h in occupied),default=0)
-    return cards, headers, height
+        for key in grouped.get(title, ()):
+            if key not in allowed: continue
+            j = len(cards)
+            col, row = j % GRID_COLS, j // GRID_COLS
+            cards.append({'key': key, 'category': title,
+                          'x': LEFT_MARGIN + col * (CARD_W + GAP_X),
+                          'y': row * (CARD_H + GAP_Y), 'row': row})
+    height = cards[-1]['y'] + CARD_H if cards else 0
+    return cards, [], height
 
 
 CARDS, HEADERS, VIRTUAL_HEIGHT = sections_layout()
@@ -27407,23 +27449,29 @@ def picker_skin():
                  font='Regular;%d'%round(27*f),foregroundColor='#d0e4ee',
                  transparent='1',valign='center',zPosition='5'))
     s.append(box('selected_count',821,18,210,45,f,ox,oy,
-                 font='Regular;%d'%round(20*f),foregroundColor='#79eab2',
-                 transparent='1',halign='right',valign='center',zPosition='5'))
+                 font='Regular;%d'%round(20*f),foregroundColor='#a2ffcf',
+                 backgroundColor='#163c35',borderColor='#2e705b',borderWidth=str(max(1,round(f))),
+                 halign='center',valign='center',zPosition='5'))
     s.append(box('plugins_count',1055,18,181,45,f,ox,oy,
-                 font='Regular;%d'%round(20*f),foregroundColor='#b8dffd',
-                 transparent='1',halign='right',valign='center',zPosition='5'))
+                 font='Regular;%d'%round(20*f),foregroundColor='#c5e8ff',
+                 backgroundColor='#173348',borderColor='#345d78',borderWidth=str(max(1,round(f))),
+                 halign='center',valign='center',zPosition='5'))
     # Single full-width board. NO central divider / independent half-columns.
     s.append(box('bar',16,88,1248,555,f,ox,oy,zPosition='1',transparent='1'))
-    for i,(title,x,y,ww) in enumerate(HEADERS):
-        s.append(box('group%d'%i,x,VIEW_TOP,ww,HEADING_H,f,ox,oy,
-                     font='Regular;%d'%round(19*f),foregroundColor='#f0c881',
-                     transparent='1',zPosition='3'))
+    for i, label in enumerate(TAB_LABELS):
+        s.append(box('tab%d'%i,TAB_LEFT+i*(TAB_W+TAB_GAP),TAB_TOP,TAB_W,TAB_H,f,ox,oy,
+                     font='Regular;%d'%round(18*f),foregroundColor='#c8dce5',
+                     backgroundColor='#102631',borderColor='#345362',borderWidth='1',
+                     halign='center',valign='center',zPosition='5'))
+    s.append(box('navhint',36,585,1208,40,f,ox,oy,
+                 font='Regular;%d'%round(18*f),foregroundColor='#9db8c7',
+                 transparent='1',halign='center',valign='center',zPosition='5'))
     for i,item in enumerate(CARDS):
         s.append(box('tile%d'%i,0,105,CARD_W,CARD_H,f,ox,oy,
                      zPosition='2',backgroundColor='#0b2027',borderColor='#285367',
                      borderWidth=str(max(1,round(f)))))
         # Cropped symbols appear at consistent apparent size regardless of original dark padding.
-        s.append(box('icon%d'%i,0,105,76,54,f,ox,oy,
+        s.append(box('icon%d'%i,0,105,84,60,f,ox,oy,
                      transparent='1',alphatest='blend',scale='1',zPosition='4'))
         # Regular maps to nmsbd (bold) on OpenATV skin_default.
         name=NAMES[item['key']]
@@ -27488,6 +27536,8 @@ class GridPicker(Screen):
         self.checked = set(self.default_allowed) if mode == 'install' else set()
         self.cursor = 0
         self.offset = 0
+        self.tab_focus = False
+        self.tab_cursor = 0
         self.states = {}
         self.entries = []
         self.layout_headers = HEADERS
@@ -27499,8 +27549,9 @@ class GridPicker(Screen):
         self['selected_count'] = Label('')
         self['plugins_count'] = Label('')
         self['bar'] = Label('')
-        for i, _ in enumerate(HEADERS):
-            self['group%d'%i] = Label('')
+        for i, label in enumerate(TAB_LABELS):
+            self['tab%d'%i] = Label('%d %s'%(i+1,label))
+        self['navhint'] = Label('1-9: Jump to category   |   UP from first row: Categories   |   OK: Select')
         for i, item in enumerate(CARDS):
             for prefix, cls in (('tile',Label),('icon',Pixmap),('name',Label),('tick',Label)):
                 self['%s%d'%(prefix,i)] = cls() if prefix != 'tile' else cls('')
@@ -27509,16 +27560,17 @@ class GridPicker(Screen):
             ('redkey','EXIT'),
             ('greenkey','INSTALL' if mode=='install' else 'REMOVE'),
             ('yellowkey','ALL'),('bluekey','NONE'),
-            ('menukey','MENU'),('infokey','INFO : UPDATE')):
+            ('menukey','MENU'),('infokey','INFO: UPDATE PANEL')):
             self[key]=Label(text)
         self['trashicon']=Pixmap()
         self['actions']=ActionMap(
-            ['OkCancelActions','DirectionActions','ColorActions','MenuActions','InfoActions','InfobarEPGActions'],
+            ['OkCancelActions','DirectionActions','ColorActions','MenuActions','InfoActions','InfobarEPGActions','NumberActions'],
             {'up':lambda:self.navigate('up'),'down':lambda:self.navigate('down'),
              'left':lambda:self.navigate('left'),'right':lambda:self.navigate('right'),
              'ok':self.toggle,'green':self.execute,'yellow':self.all,'blue':self.none,
              'red':self.close,'cancel':self.close,'menu':self.change_mode,
-             'info':self.show_updates,'showEventInfo':self.show_updates},-1)
+             'info':self.show_updates,'showEventInfo':self.show_updates,
+             **{str(i+1):(lambda index=i:self.jump_category(index)) for i in range(len(TAB_LABELS))}},-1)
         self.onLayoutFinish.append(self.on_ready)
 
     def scan(self):
@@ -27588,21 +27640,19 @@ class GridPicker(Screen):
             if cy-HEADING_H<self.offset:
                 self.offset=max(0,cy-HEADING_H-4)
             self.offset=max(0,min(self.offset,max(0,self.virtual_height-VIEW_HEIGHT)))
-        visible_keys=set(item['key'] for item in self.entries)
-        headings={title:(x,y,ww) for title,x,y,ww in self.layout_headers}
-        for i,(title,_,_,_) in enumerate(HEADERS):
-            label=self['group%d'%i]
-            if title not in headings:
-                label.hide()
-                continue
-            x,y,ww=headings[title]
-            yy=VIEW_TOP+y-self.offset
-            if VIEW_TOP<=yy and yy+HEADING_H<=VIEW_BOTTOM:
-                label.setText(title)
-                self.move_widget('group%d'%i,x,yy)
-                label.show()
-            else:
-                label.hide()
+        selected_category = selected['category'] if selected else None
+        available = set(card['category'] for card in self.entries)
+        for i, title in enumerate(DISPLAY_GROUP_ORDER):
+            focused = self.tab_focus and self.tab_cursor == i
+            current = not self.tab_focus and selected_category == title
+            try:
+                tab = self['tab%d'%i].instance
+                tab.setBackgroundColor(parseColor('#e6b944' if focused else '#21483e' if current else '#102631'))
+                tab.setForegroundColor(parseColor('#15202a' if focused else '#a2ffcf' if current else '#c8dce5' if title in available else '#657781'))
+                tab.setBorderColor(parseColor('#ffe08b' if focused else '#63deb0' if current else '#345362'))
+                tab.setBorderWidth(max(1,round((2 if focused or current else 1)*self._f)))
+            except Exception:
+                pass
         by_key={card['key']:card for card in self.entries}
         for i,item in enumerate(CARDS):
             key=item['key']
@@ -27614,13 +27664,13 @@ class GridPicker(Screen):
             if not visible:continue
             x=card['x']
             self.move_widget('tile%d'%i,x,yy)
-            self.move_widget('icon%d'%i,x+(CARD_W-76)//2,yy+4)
-            self.move_widget('name%d'%i,x+5,yy+57)
+            self.move_widget('icon%d'%i,x+(CARD_W-84)//2,yy+9)
+            self.move_widget('name%d'%i,x+5,yy+76)
             self.move_widget('tick%d'%i,x+CARD_W-32,yy+1)
-            focused=bool(selected and selected['key']==key)
+            focused=bool(not self.tab_focus and selected and selected['key']==key)
             chosen=(key in self.checked)
             # Whole-card yellow focus, independent [X]/[ ] selected status.
-            bg = '#e6b944' if focused else ('#114235' if chosen else '#0b2029')
+            bg = '#e6b944' if focused else ('#114235' if chosen else '#26333d')
             edge = '#ffe08b' if focused else ('#28cf91' if chosen else '#34576a')
             tick='[X]' if chosen else '[ ]'
             self['tick%d'%i].setText(tick)
@@ -27636,30 +27686,48 @@ class GridPicker(Screen):
             except Exception:
                 pass
 
+    def jump_category(self, index):
+        title = DISPLAY_GROUP_ORDER[index]
+        for j, card in enumerate(self.entries):
+            if card['category'] == title:
+                self.cursor = j
+                self.tab_cursor = index
+                self.tab_focus = False
+                self.draw()
+                return
+        # An empty uninstall category keeps the current card and selection.
+        self.tab_cursor = index
+        self.tab_focus = True
+        self.draw()
+
     def navigate(self, direction):
-        if not self.entries: return
-        cur=self.selected_card(); ix=self.cursor
-        cx=cur['x']+CARD_W/2.0; cy=cur['y']+CARD_H/2.0
-        possibilities=[]
-        for j,target in enumerate(self.entries):
-            if j==ix:continue
-            x=target['x']+CARD_W/2.0; y=target['y']+CARD_H/2.0
-            dx=x-cx; dy=y-cy
-            if direction=='left' and dx < -20 and abs(dy)<CARD_H: score=abs(dx)+abs(dy)*8
-            elif direction=='right' and dx > 20 and abs(dy)<CARD_H:score=abs(dx)+abs(dy)*8
-            elif direction=='up' and dy < -20: score=abs(dy)*3+abs(dx)
-            elif direction=='down' and dy > 20:score=abs(dy)*3+abs(dx)
-            else:continue
-            possibilities.append((score,j))
-        if possibilities:
-            self.cursor=min(possibilities)[1]
-        elif direction=='right' and self.cursor+1<len(self.entries):
-            self.cursor+=1
-        elif direction=='left' and self.cursor>0:
-            self.cursor-=1
+        if self.tab_focus:
+            if direction == 'left': self.tab_cursor = (self.tab_cursor-1) % len(TAB_LABELS)
+            elif direction == 'right': self.tab_cursor = (self.tab_cursor+1) % len(TAB_LABELS)
+            elif direction == 'down':
+                self.jump_category(self.tab_cursor)
+                return
+            self.draw()
+            return
+        if not self.entries:
+            self.tab_focus = True
+            self.draw()
+            return
+        if direction == 'up' and self.cursor < GRID_COLS:
+            self.tab_focus = True
+            self.tab_cursor = DISPLAY_GROUP_ORDER.index(self.selected_card()['category'])
+        elif direction == 'left': self.cursor = max(0,self.cursor-1)
+        elif direction == 'right': self.cursor = min(len(self.entries)-1,self.cursor+1)
+        elif direction == 'up': self.cursor = max(0,self.cursor-GRID_COLS)
+        elif direction == 'down':
+            if (self.cursor//GRID_COLS+1)*GRID_COLS < len(self.entries):
+                self.cursor = min(len(self.entries)-1,self.cursor+GRID_COLS)
         self.draw()
 
     def toggle(self):
+        if self.tab_focus:
+            self.jump_category(self.tab_cursor)
+            return
         item=self.selected_card()
         if item is None:return
         key=item['key']
