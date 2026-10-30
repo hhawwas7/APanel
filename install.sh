@@ -2,9 +2,9 @@
 # APanel installation bootstrap. Copyright Mr. H.HAWWAS.
 # The program is distributed as a separate packaged payload.
 
-VERSION=v0.4.35
-PACKAGE_URL=https://raw.githubusercontent.com/hhawwas7/APanel/main/dist/apanel-v0.4.35.dat
-PACKAGE_SHA256=165a95d286c6dbef5cc8bb395f551d4e7bd9969405abb4a4207f036884a6578d
+VERSION=v0.4.36
+PACKAGE_URL=https://raw.githubusercontent.com/hhawwas7/APanel/main/dist/apanel-v0.4.36.dat
+PACKAGE_SHA256=da46284aec029e0548a908daeb273ef2fa67e89bb02e66b348b62b9baf37feda
 
 if [ "$(id -u)" -ne 0 ] || ! command -v opkg >/dev/null 2>&1; then
     echo 'ERROR: A root Enigma2 image with opkg is required.'
