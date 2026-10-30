@@ -2,9 +2,9 @@
 # APanel installation bootstrap. Copyright Mr. H.HAWWAS.
 # The program is distributed as a separate packaged payload.
 
-VERSION=v0.4.43
-PACKAGE_URL=https://raw.githubusercontent.com/hhawwas7/APanel/main/dist/apanel-v0.4.43.dat
-PACKAGE_SHA256=a36f0f191a4d1b450ec1c30e6682394a261e29654a233b0ac98a8183e8e8715b
+VERSION=v0.4.44
+PACKAGE_URL=https://raw.githubusercontent.com/hhawwas7/APanel/main/dist/apanel-v0.4.44.dat
+PACKAGE_SHA256=184866cd70744d75800242c003af4df7b34598b263b1c26d000bd2c294e4d68d
 
 if [ "$(id -u)" -ne 0 ] || ! command -v opkg >/dev/null 2>&1; then
     echo 'ERROR: A root Enigma2 image with opkg is required.'
@@ -48,6 +48,7 @@ if ! /bin/sh -n "$APANEL_SETUP_DIR/runtime.sh"; then
     echo 'ERROR: Installation package syntax check failed.'
     exit 1
 fi
+case "${0##*/}" in apanel-next-install.sh) [ "${1:-}" = --panel-update ] || set -- --panel-update "$@" ;; esac
 /bin/sh "$APANEL_SETUP_DIR/runtime.sh" "$@"
 APANEL_SETUP_STATUS=$?
 exit "$APANEL_SETUP_STATUS"
