@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.22 - Enigma2 / opkg TV installer and uninstaller
+# A Panel v0.4.23 - Enigma2 / opkg TV installer and uninstaller
 # Python 3.9+ / opkg images; platform-aware source selection. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.22
+VERSION=v0.4.23
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -38160,7 +38160,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.22 — Enigma2 / opkg
+# A Panel v0.4.23 — Enigma2 / opkg
 from __future__ import absolute_import
 
 import os
@@ -38178,9 +38178,9 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.22'
+VERSION = 'v0.4.23'
 TITLE = 'A Panel'
-AUTHOR = 'Mr. Hamdy Hawass'
+AUTHOR = 'Mr. H.HAWWAS'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
 ASSETS = ROOT + '/assets'
 # Use a bundled regular face so category text is independent of bold skin fonts.
@@ -39099,7 +39099,7 @@ def open_plugin(session,**kwargs):
 
 
 def Plugins(**kwargs):
-    return [PluginDescriptor(name='APanel',description='Mr. Hamdy Hawass',
+    return [PluginDescriptor(name='APanel',description='Mr. H.HAWWAS',
             icon='plugin.png',where=PluginDescriptor.WHERE_PLUGINMENU,fnc=open_plugin),
             PluginDescriptor(where=PluginDescriptor.WHERE_SESSIONSTART,fnc=session_start)]
 
