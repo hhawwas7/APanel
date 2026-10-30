@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.27 - Enigma2 / opkg TV installer and uninstaller
+# A Panel v0.4.28 - Enigma2 / opkg TV installer and uninstaller
 # Python 3.9+ / opkg images; platform-aware source selection. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.27
+VERSION=v0.4.28
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -38173,7 +38173,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.27 — Enigma2 / opkg
+# A Panel v0.4.28 — Enigma2 / opkg
 from __future__ import absolute_import
 
 import os
@@ -38191,7 +38191,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.27'
+VERSION = 'v0.4.28'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. H.HAWWAS'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -38261,8 +38261,8 @@ NAMES = {'aj': 'AJ Panel',
  'chocholousek': 'Chocholousek\nPicons'}
 ALL_KEYS = [key for _, keys in GROUPS for key in keys]
 
-DEFAULT_SELECTION = ('aj', 'ncam', 'oscamlevi', 'furybiss', 'livefeed', 'satelliweb', 'ipaudioplus', 'ipaudio', 'mixaudio', 'tmdb', 'transmission', 'xstreamity', 'footonsat', 'customcs', 'epggrabber', 'subs', 'aglare', 'arabicsavior', 'raed', 'cacheflush')
-DEFAULT_NOTICE = 'Review selections before installing. Some plugins offer similar features; use ALL or NONE to adjust.'
+DEFAULT_SELECTION = ()
+DEFAULT_NOTICE = 'Select the plugins you want to install. Use ALL or NONE to adjust.'
 
 # Exact registered packages, plus distinctive program files/directories.
 # A saved configuration alone must NEVER count as Installed.
@@ -38546,7 +38546,6 @@ class GridPicker(Screen):
         self.mode = mode
         self.image_unavailable = image_plugin_policy()
         self.allowed = set(ALL_KEYS) - set(self.image_unavailable)
-        self.default_allowed = set(DEFAULT_SELECTION) & self.allowed
         self.checked = set()
         self.cursor = 0
         self.offset = 0
@@ -38635,8 +38634,7 @@ class GridPicker(Screen):
                  [k for k in ALL_KEYS if self.states[k]=='Installed'])
         self.entries, self.layout_headers, self.virtual_height = sections_layout(keys)
         self.cursor = 0
-        self.checked = (set(k for k in self.default_allowed if self.states.get(k)=='Not Installed')
-                        if self.mode=='install' else set())
+        self.checked = set()
         self.intro_active = self.mode=='install'
         if self.intro_active and hasattr(self,'intro_timer'):self.intro_timer.start(6500,True)
         for i,item in enumerate(CARDS):
