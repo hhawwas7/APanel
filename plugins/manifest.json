@@ -1,0 +1,23 @@
+{
+  "mawaqit": {
+    "folder": "Mawaqit",
+    "version": "v1.3",
+    "sha256": "feed2f1209b0fdcb27dfa7bfb3f9fb001541f002e1bfee3d0ca01e2025a4059b",
+    "file": "mawaqit-v1.3.ipk.b64",
+    "size": 1364688
+  },
+  "hisnmuslim": {
+    "folder": "HisnMuslim",
+    "version": "v1",
+    "sha256": "4df373f17de6107618ae052945a3327e2494cf1bfe5eaf5806628a458e287500",
+    "file": "hisnmuslim-v1.ipk.b64",
+    "size": 462186
+  },
+  "iqraaquran": {
+    "folder": "IqraaQuran",
+    "version": "1.3-source",
+    "sha256": "cc59eae2ace80ec791f727e7acf11f7db3e32e2eeda9097dbe9551f261b54e36",
+    "file": "iqraaquran-1.3-source.ipk.b64",
+    "size": 7525696
+  }
+}
