@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.28 - Enigma2 / opkg TV installer and uninstaller
+# A Panel v0.4.29 - Enigma2 / opkg TV installer and uninstaller
 # Python 3.9+ / opkg images; platform-aware source selection. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.28
+VERSION=v0.4.29
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -47,7 +47,11 @@ bar() {
 pulse() {
     while :; do
         sleep 20
-        report "... $1 still running"
+        if [ "${MODE:-install}" = remove ]; then
+            report "Still removing: $1. Please wait..."
+        else
+            report "Still installing: $1. Please wait..."
+        fi
     done
 }
 
@@ -38173,7 +38177,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.28 — Enigma2 / opkg
+# A Panel v0.4.29 — Enigma2 / opkg
 from __future__ import absolute_import
 
 import os
@@ -38191,7 +38195,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.28'
+VERSION = 'v0.4.29'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. H.HAWWAS'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -38539,6 +38543,122 @@ def image_plugin_policy():
     return {} if image == 'openatv' else {'aglare': 'Aglare ATV is available on OpenATV only.'}
 
 
+import queue as _notice_queue
+import threading as _notice_threading
+import time as _notice_time
+from urllib.request import Request as _NoticeRequest, urlopen as _notice_urlopen
+
+NOTICE_FILE = '/home/root/apanel-update-notice.json'
+
+
+def fetch_panel_version(results):
+    version = None
+    try:
+        request = _NoticeRequest(REPO_INSTALL, headers={
+            'User-Agent': 'APanel-update-notice', 'Cache-Control': 'no-cache'})
+        # Only this background metadata request has a timeout. Installer/package
+        # processes are independent and are never stopped or retried by this code.
+        with _notice_urlopen(request, timeout=8) as response:
+            header = response.read(8192).decode('utf-8', 'replace')
+        match = re.search(r'(?m)^VERSION=(v[0-9]+(?:\.[0-9]+){1,3})\r?$', header)
+        if header.startswith('#!/bin/sh\n') and match:
+            version = match.group(1)
+    except Exception:
+        pass
+    results.put(version)
+
+
+def read_update_notices():
+    try:
+        with open(NOTICE_FILE, encoding='utf-8') as stream:
+            data = json.loads(stream.read(8192))
+        values = data.get('notified', [])
+        if isinstance(values, list):
+            return [v for v in values[-16:] if isinstance(v, str) and
+                    re.fullmatch(r'v[0-9]+(?:\.[0-9]+){1,3}', v)]
+    except Exception:
+        pass
+    return []
+
+
+def remember_update_notice(version):
+    values = read_update_notices()
+    if version not in values:
+        values.append(version)
+    temporary = NOTICE_FILE + '.tmp.' + str(os.getpid())
+    try:
+        with open(temporary, 'w', encoding='utf-8') as stream:
+            json.dump({'notified': values[-16:]}, stream)
+        os.replace(temporary, NOTICE_FILE)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
+class PanelUpdateNotice(object):
+    last_check = None
+    shown_versions = set()
+
+    def __init__(self, owner):
+        self.owner = owner
+        self.alive = True
+        self.started = False
+        self.received = False
+        self.remote_version = None
+        self.results = _notice_queue.Queue()
+        self.timer = eTimer()
+        try:
+            self.timer.callback.append(self.poll)
+        except AttributeError:
+            self.timer_connection = self.timer.timeout.connect(self.poll)
+
+    def start(self):
+        if not self.alive or self.started or active():
+            return
+        now = _notice_time.monotonic()
+        if self.last_check is not None and now - self.last_check < 60:
+            return
+        PanelUpdateNotice.last_check = now
+        self.started = True
+        try:
+            worker = _notice_threading.Thread(target=fetch_panel_version, args=(self.results,), daemon=True)
+            worker.start()
+            self.timer.start(500, False)
+        except Exception:
+            self.timer.stop()
+
+    def stop(self):
+        self.alive = False
+        self.timer.stop()
+
+    def poll(self):
+        if not self.alive:
+            return
+        if not self.received:
+            try:
+                self.remote_version = self.results.get_nowait()
+                self.received = True
+            except _notice_queue.Empty:
+                return
+        remote = self.remote_version
+        if not remote or version_tuple(remote) <= version_tuple(VERSION) or active():
+            self.timer.stop()
+            return
+        if remote in self.shown_versions or remote in read_update_notices():
+            self.timer.stop()
+            return
+        # Wait until the picker is in front again if INFO or another dialog is open.
+        if not getattr(self.owner, 'execing', True):
+            return
+        self.timer.stop()
+        message = 'يتوفر تحديث جديد للبانل، الإصدار %s. افتح المعلومات لتحديث البانل.' % arabic_version(remote)
+        self.owner.session.open(MessageBox, message, MessageBox.TYPE_INFO, timeout=10)
+        self.shown_versions.add(remote)
+        remember_update_notice(remote)
+
+
 class GridPicker(Screen):
     def __init__(self, session, mode):
         Screen.__init__(self, session)
@@ -38590,6 +38710,8 @@ class GridPicker(Screen):
         try:self.intro_timer.callback.append(self.end_intro)
         except AttributeError:self.intro_connection=self.intro_timer.timeout.connect(self.end_intro)
         self.onClose.append(self.intro_timer.stop)
+        self.update_notice = PanelUpdateNotice(self)
+        self.onClose.append(self.update_notice.stop)
         self.onLayoutFinish.append(self.on_ready)
 
     def scan(self):
@@ -38643,6 +38765,8 @@ class GridPicker(Screen):
             except Exception:
                 pass
         self.draw()
+        if self.mode=='install' and hasattr(self,'update_notice'):
+            self.update_notice.start()
 
     def end_intro(self):
         self.intro_active = False
