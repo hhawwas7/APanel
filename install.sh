@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.23 - Enigma2 / opkg TV installer and uninstaller
+# A Panel v0.4.24 - Enigma2 / opkg TV installer and uninstaller
 # Python 3.9+ / opkg images; platform-aware source selection. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.23
+VERSION=v0.4.24
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -366,6 +366,16 @@ def validate_binary(path, profile):
     return True
 
 
+def probe_binary(path, profile):
+    validate_binary(path, profile)
+    result = subprocess.run([str(path), '-V'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            timeout=10, check=False)
+    output = result.stdout.decode('utf-8', 'replace')
+    if result.returncode != 0 or not re.search(r'(?im)^\s*Version\s*:|\bOSCam\b', output):
+        raise ValueError('OSCam build-information probe did not succeed')
+    return True
+
+
 def make_tar(files):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
@@ -475,10 +485,10 @@ def main(args):
         if not re.fullmatch(r'[0-9][A-Za-z0-9._-]{1,60}', tag):
             raise ValueError('Invalid upstream release tag')
         print(tag)
-    elif args[0] == 'validate-binary':
+    elif args[0] in ('validate-binary', 'probe-binary'):
         with open(args[2]) as stream:
             profile = json.load(stream)
-        validate_binary(args[1], profile)
+        (probe_binary if args[0] == 'probe-binary' else validate_binary)(args[1], profile)
     elif args[0] == 'build-source':
         output = subprocess.check_output(['opkg', 'list-installed']).decode('utf-8', 'replace')
         installed = {line.split()[0] for line in output.splitlines() if line.strip()}
@@ -751,10 +761,13 @@ install_levi() {
             say 'OSCam installed: registered package and matching executable verified.'
             return 0
         fi
-        say 'OSCam executable detected; package configuration needs review (CHECK, not a missing cam).'
-        return 2
+        if platform_tool probe-binary /usr/bin/OSCam_11968-803 "$APANEL_PROFILE"; then
+            say 'OSCam installed: executable runs successfully; package-manager warning retained in log only.'
+            return 0
+        fi
+        say 'OSCam executable could not run successfully.'
+        return 1
     fi
-    [ "$OSCAM_RC" -eq 0 ] && return 2
     return 1
 }
 
@@ -38160,7 +38173,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.23 — Enigma2 / opkg
+# A Panel v0.4.24 — Enigma2 / opkg
 from __future__ import absolute_import
 
 import os
@@ -38178,7 +38191,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.23'
+VERSION = 'v0.4.24'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. H.HAWWAS'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
