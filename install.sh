@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.26 - Enigma2 / opkg TV installer and uninstaller
+# A Panel v0.4.27 - Enigma2 / opkg TV installer and uninstaller
 # Python 3.9+ / opkg images; platform-aware source selection. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.26
+VERSION=v0.4.27
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -38173,7 +38173,7 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.26 — Enigma2 / opkg
+# A Panel v0.4.27 — Enigma2 / opkg
 from __future__ import absolute_import
 
 import os
@@ -38191,7 +38191,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.26'
+VERSION = 'v0.4.27'
 TITLE = 'A Panel'
 AUTHOR = 'Mr. H.HAWWAS'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
@@ -38489,7 +38489,7 @@ def picker_skin():
         s.append(box('tick%d'%i,0,105,30,23,f,ox,oy,
                      font='Regular;%d'%round(16*f),foregroundColor='#ffffff',
                      halign='center',valign='center',transparent='1',zPosition='6'))
-    # Keep the footer in one row; TXT opens the panel update screen.
+    # Preserve v0.4.10 footer exactly: SIX same-height buttons in a single row.
     s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="#08151e" zPosition="-1" />'%(
         *coords(25,651,f,ox,oy),int(round(1230*f)),int(round(62*f))))
     foot=[
@@ -38498,29 +38498,19 @@ def picker_skin():
         ('yellowkey',428,184,'#eec126','#14171b'),
         ('bluekey',624,184,'#257fe6','#ffffff'),
         ('menukey',820,190,'#f3f5f7','#17222d'),
-        ('infokey',1023,80,'#343d47','#f2f4f6'),
-        ('updatekey',1113,125,'#b7c9d1','#17222d'),
+        ('infokey',1023,215,'#343d47','#f2f4f6'),
     ]
     for key,x,ww,bgcolor,textcolor in foot:
         bx,by=coords(x,661,f,ox,oy)
         s.append('<eLabel position="%d,%d" size="%d,%d" backgroundColor="%s" zPosition="3" />'%(
             bx,by,int(round(ww*f)),int(round(43*f)),bgcolor))
-        if key == 'updatekey':
-            s.append(box(key,x+5,661,45,43,f,ox,oy,
-                         font=UI_FONT+';%d'%round(17*f),foregroundColor=textcolor,
-                         borderWidth='0',shadowOffset='0,0',transparent='1',halign='center',valign='center',zPosition='5'))
-            s.append(box('refreshicon',x+99,671,22,22,f,ox,oy,
-                         transparent='1',alphatest='blend',scale='1',zPosition='6'))
-            s.append(box('updateabbr',x+54,661,34,43,f,ox,oy,
-                         font=UI_FONT+';%d'%round(18*f),foregroundColor=textcolor,
-                         borderWidth='0',shadowOffset='0,0',transparent='1',halign='center',valign='center',zPosition='5'))
-        elif key == 'menukey':
+        if key == 'menukey':
             s.append(box(key,x+46,661,ww-52,43,f,ox,oy,
                          font='Regular;%d'%round(19*f),foregroundColor=textcolor,
                          borderWidth='0',shadowOffset='0,0',transparent='1',halign='center',valign='center',zPosition='5'))
         else:
             s.append(box(key,x,661,ww,43,f,ox,oy,
-                         font='Regular;%d'%round((18 if key in ('infokey','updatekey') else 22)*f),foregroundColor=textcolor,
+                         font='Regular;%d'%round((18 if key=='infokey' else 22)*f),foregroundColor=textcolor,
                          borderWidth='0',shadowOffset='0,0',transparent='1',halign='center',valign='center',zPosition='5'))
     for symbol,x in [('trash',845)]:
         s.append(box(symbol+'icon',x,671,25,25,f,ox,oy,
@@ -38585,17 +38575,16 @@ class GridPicker(Screen):
             ('redkey','EXIT'),
             ('greenkey','INSTALL' if mode=='install' else 'REMOVE'),
             ('yellowkey','ALL'),('bluekey','NONE'),
-            ('menukey','MENU' if mode=='install' else 'BACK'),('infokey','INFO'),('updatekey','TXT:'),('updateabbr','AP')):
+            ('menukey','MENU' if mode=='install' else 'BACK'),('infokey','INFO')):
             self[key]=Label(text)
         self['trashicon']=Pixmap()
-        self['refreshicon']=Pixmap()
         self['actions']=ActionMap(
-            ['OkCancelActions','DirectionActions','ColorActions','MenuActions','InfoActions','InfobarEPGActions','InfobarTeletextActions','NumberActions'],
+            ['OkCancelActions','DirectionActions','ColorActions','MenuActions','InfoActions','InfobarEPGActions','NumberActions'],
             {'up':lambda:self.navigate('up'),'down':lambda:self.navigate('down'),
              'left':lambda:self.navigate('left'),'right':lambda:self.navigate('right'),
              'ok':self.toggle,'green':self.execute,'yellow':self.all,'blue':self.none,
              'red':self.close,'cancel':self.close,'menu':self.change_mode,
-             'info':self.show_info,'showEventInfo':self.show_info,'startTeletext':self.show_update,
+             'info':self.show_info,'showEventInfo':self.show_info,
              **{str(i+1):(lambda index=i:self.jump_category(index)) for i in range(len(TAB_LABELS))}},-1)
         self.intro_active = False
         self.intro_timer = eTimer()
@@ -38636,7 +38625,7 @@ class GridPicker(Screen):
                 self.evidence[key] = self.image_unavailable[key]
 
     def on_ready(self):
-        for key, filename in (('trashicon','controls/trash.png'),('refreshicon','controls/refresh.png'),('brandlogo','plugin.png')):
+        for key, filename in (('trashicon','controls/trash.png'),('brandlogo','plugin.png')):
             try:
                 self[key].instance.setPixmapFromFile(ASSETS+'/'+filename)
             except Exception:
@@ -38719,8 +38708,8 @@ class GridPicker(Screen):
             focused=bool(not self.tab_focus and selected and selected['key']==key)
             chosen=(key in self.checked)
             # Whole-card yellow focus, independent [X]/[ ] selected status.
-            bg = '#e6b944' if focused else ('#0b3020' if chosen else '#26333d')
-            edge = '#ffe08b' if focused else ('#397c4c' if chosen else '#34576a')
+            bg = '#e6b944' if focused else ('#287347' if chosen else '#26333d')
+            edge = '#ffe08b' if focused else ('#63ac78' if chosen else '#34576a')
             tick='[X]' if chosen else '[ ]'
             self['tick%d'%i].setText(tick)
             try:
@@ -38729,7 +38718,7 @@ class GridPicker(Screen):
                 tile.setBorderColor(parseColor(edge))
                 tile.setBorderWidth(max(1,round((3 if focused else 2)*self._f)))
                 self['tick%d'%i].instance.setForegroundColor(parseColor(
-                    '#15202a' if focused else '#bfdcc4' if chosen else '#8aa3b1'))
+                    '#15202a' if focused else '#e0f0e3' if chosen else '#8aa3b1'))
                 self['name%d'%i].instance.setForegroundColor(parseColor(
                     '#15202a' if focused else '#ffffff'))
             except Exception:
@@ -38783,8 +38772,6 @@ class GridPicker(Screen):
         item=self.selected_card()
         if item is None:return
         key=item['key']
-        if self.mode=='install' and key == 'audioshift' and not is_one() and key not in self.checked:
-            self.warn_audioshift()
         if self.mode=='install' and key not in self.allowed:
             reason=getattr(self, 'image_unavailable', {}).get(key)
             if reason:self.session.open(MessageBox, reason, MessageBox.TYPE_INFO, timeout=6)
@@ -38793,18 +38780,10 @@ class GridPicker(Screen):
         else:self.checked.add(key)
         self.draw()
 
-    def warn_audioshift(self):
-        if not is_one():
-            self.session.open(MessageBox,
-                'يعمل AudioShift بصورة أفضل على Dreambox One وDreambox Two.\nقد يختلف توافقه على الأجهزة الأخرى.',
-                MessageBox.TYPE_INFO, timeout=6)
-
     def all(self):
         self.intro_active = False
         selected=set(card['key'] for card in self.entries if self.mode=='uninstall' or
                      (card['key'] in self.allowed and self.states.get(card['key'])=='Not Installed'))
-        if self.mode=='install' and 'audioshift' in selected and 'audioshift' not in self.checked:
-            self.warn_audioshift()
         self.checked=selected
         self.draw()
 
@@ -38818,9 +38797,6 @@ class GridPicker(Screen):
             if active():self.session.open(TaskProgress)
             else:self.session.open(UninstallPicker)
         else:self.close()
-
-    def show_update(self):
-        self.session.open(UpdateScreen)
 
     def show_info(self):
         self.session.open(InfoScreen)
