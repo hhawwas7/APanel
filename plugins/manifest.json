@@ -19,5 +19,13 @@
     "sha256": "cc59eae2ace80ec791f727e7acf11f7db3e32e2eeda9097dbe9551f261b54e36",
     "file": "iqraaquran-1.3-source.ipk.b64",
     "size": 7525696
+  },
+  "ansite": {
+    "folder": "Ansite",
+    "version": "1.12.py3",
+    "file": "ansite-1.12.py3.ipk.b64",
+    "sha256": "13dce017e310578c8552db55e5e5eece968ea641630ed9a597b5a034fba44c2b",
+    "size": 6218262,
+    "reciters_sha256": "3c2e53b488cdba7f2f8ca511fc697ff2d6d2aa5bf8536a6641cfb4edc0e24c4d"
   }
 }
