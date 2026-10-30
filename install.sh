@@ -1,11 +1,11 @@
 #!/bin/sh
-# A Panel v0.4.21 - OpenATV Enigma2 TV installer / uninstaller
-# OpenATV / opkg only. GSH2 is intentionally excluded.
+# A Panel v0.4.22 - Enigma2 / opkg TV installer and uninstaller
+# Python 3.9+ / opkg images; platform-aware source selection. GSH2 is intentionally excluded.
 # Third-party installers run as root.
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 
-VERSION=v0.4.21
+VERSION=v0.4.22
 ROOT=/home/root
 CORE=$ROOT/apanel-core.sh
 PLUG=/usr/lib/enigma2/python/Plugins/Extensions/APanel
@@ -17,6 +17,7 @@ REQUEST=/tmp/apanel-ui-request
 PIDFILE=/tmp/apanel-task.pid
 MODEFILE=/tmp/apanel-task.mode
 REMOVE_OPTIONS=/home/root/apanel-remove-options.txt
+APANEL_PROFILE=$ROOT/apanel-platform.json
 
 say() {
     printf '%s\n' "$*"
@@ -90,7 +91,7 @@ begin_restart_guard() {
     APANEL_GUARD_REAL_PATH=$PATH
     APANEL_GUARD_DIR=$(mktemp -d /tmp/apanel-restart-guard.XXXXXX) || return 1
     export APANEL_GUARD_REAL_PATH APANEL_GUARD_DIR
-    for GUARD_CMD in init telinit systemctl service killall pkill start-stop-daemon reboot shutdown halt poweroff busybox; do
+    for GUARD_CMD in init telinit systemctl service killall pkill start-stop-daemon reboot shutdown halt poweroff busybox opkg uname; do
         GUARD_REAL=$(command -v "$GUARD_CMD" 2>/dev/null) || continue
         case "$GUARD_REAL" in /*) : ;; *) continue ;; esac
         printf '%s\n' "$GUARD_REAL" > "$APANEL_GUARD_DIR/real-$GUARD_CMD" || return 1
@@ -105,7 +106,7 @@ case "$CMD" in
         case "${1:-}" in 0|3|4|6) DEFER=1 ;; esac ;;
     killall|pkill|start-stop-daemon)
         for ARG in "$@"; do
-            case "$ARG" in enigma2|*/enigma2|'^enigma2$') DEFER=1 ;; esac
+            case "$ARG" in enigma2|*/enigma2|'^enigma2$'|opkg|*/opkg|'^opkg$') DEFER=1 ;; esac
         done ;;
     systemctl|service)
         TARGET=0
@@ -116,10 +117,15 @@ case "$CMD" in
             case "$ARG" in reboot|poweroff|halt|isolate) DEFER=1 ;; esac
         done
         [ "$TARGET" = 1 ] && [ "$ACTION" = 1 ] && DEFER=1 ;;
+    opkg) exec python3 "$APANEL_GUARD_DIR/opkg-check.py" "$@" ;;
+    uname)
+        if [ "$#" -eq 1 ] && [ "$1" = -m ] && [ "${APANEL_CPU:-}" = arm ]; then
+            case "${APANEL_MACHINE:-}" in aarch64|arm64) printf 'armv7l\n'; exit 0 ;; esac
+        fi ;;
     busybox)
         # Keep explicit 'busybox killall/reboot/...' inside the same guard.
         APPLET=${1:-}
-        case "$APPLET" in init|telinit|killall|pkill|start-stop-daemon|reboot|shutdown|halt|poweroff)
+        case "$APPLET" in init|telinit|killall|pkill|start-stop-daemon|reboot|shutdown|halt|poweroff|uname)
             if [ -x "$APANEL_GUARD_DIR/$APPLET" ]; then
                 shift
                 exec "$APANEL_GUARD_DIR/$APPLET" "$@"
@@ -135,6 +141,51 @@ fi
 IFS= read -r REAL < "$APANEL_GUARD_DIR/real-$CMD" || exit 127
 exec "$REAL" "$@"
 APANEL_RESTART_GUARD
+    if [ -f "$APANEL_GUARD_DIR/real-opkg" ]; then
+        platform_code > "$APANEL_GUARD_DIR/apanel_platform_runtime.py" || return 1
+        cat > "$APANEL_GUARD_DIR/opkg-check.py" <<'APANEL_OPKG_GUARD'
+import json
+import os
+import runpy
+import subprocess
+import sys
+import tempfile
+from urllib.parse import urlsplit
+
+
+def main():
+    folder = os.environ['APANEL_GUARD_DIR']
+    with open(os.path.join(folder, 'real-opkg')) as stream:
+        real = stream.read().strip()
+    args = sys.argv[1:]
+    if 'install' in args or 'upgrade' in args:
+        if any(arg.split('=')[0] == '--force-architecture' for arg in args):
+            raise ValueError('Forcing a different package architecture is disabled')
+        # Never bypass the receiver package manager's dependency validation.
+        args = [arg for arg in args if arg not in ('--nodeps', '--force-depends')]
+        runtime = runpy.run_path(os.path.join(folder, 'apanel_platform_runtime.py'))
+        with open(os.environ['APANEL_PROFILE']) as stream:
+            profile = json.load(stream)
+        for index, arg in enumerate(args):
+            path = arg
+            if arg.startswith(('https://', 'http://')) and urlsplit(arg).path.endswith('.ipk'):
+                descriptor, path = tempfile.mkstemp(prefix='package-', suffix='.ipk', dir=folder)
+                os.close(descriptor)
+                subprocess.check_call(['wget', '-q', '-T', '30', '-t', '2', '-O', path, arg])
+                args[index] = path
+            if path.endswith('.ipk'):
+                runtime['validate_ipk'](path, profile, source_name=arg)
+    os.execv(real, [real] + args)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        print('[A Panel] Package skipped: %s' % error, file=sys.stderr)
+        sys.exit(2)
+APANEL_OPKG_GUARD
+    fi
     chmod 700 "$APANEL_GUARD_DIR/dispatch" || return 1
     for GUARD_FILE in "$APANEL_GUARD_DIR"/real-*; do
         [ -f "$GUARD_FILE" ] || continue
@@ -175,6 +226,538 @@ remote() {
     return "$RC"
 }
 
+platform_code() {
+    cat <<'APANEL_PLATFORM_PY'
+import gzip
+import io
+import json
+import os
+import platform
+import re
+import stat
+import struct
+import subprocess
+import sys
+import tarfile
+import time
+import zipfile
+
+
+def properties(path):
+    values = {}
+    try:
+        with open(path, encoding='utf-8', errors='replace') as stream:
+            for line in stream:
+                match = re.match(r'\s*([\w-]+)\s*=\s*(.*?)\s*$', line)
+                if match:
+                    values[match[1].lower()] = match[2].strip('"\'')
+    except OSError:
+        pass
+    return values
+
+
+def collect_profile(root='/', machine=None, bits=None, byteorder=None, python_version=None, architectures=None):
+    image = properties(os.path.join(root, 'etc/image-version'))
+    release = properties(os.path.join(root, 'etc/os-release'))
+    candidates = [image.get('distro', ''), release.get('id', ''), image.get('creator', ''), release.get('name', '')]
+    distro = ''
+    for value in candidates:
+        compact = re.sub('[^a-z0-9]', '', value.lower())
+        for name in ('openatv', 'openbh', 'openblackhole', 'openpli', 'openvix', 'openhdf', 'openvision', 'egami'):
+            if compact.startswith(name):
+                distro = 'openbh' if name == 'openblackhole' else name
+                break
+        if distro:
+            break
+    if not distro:
+        try:
+            with open(os.path.join(root, 'etc/issue'), encoding='utf-8', errors='replace') as stream:
+                issue = re.sub('[^a-z0-9]', '', stream.read().lower())
+            distro = next((name for name in ('openatv', 'openbh', 'openpli', 'openvix') if name in issue), '')
+        except OSError:
+            pass
+    distro = distro or re.sub('[^a-z0-9_-]', '', release.get('id', '').lower()) or 'unknown'
+    machine = machine or platform.machine().lower()
+    bits = bits or struct.calcsize('P') * 8
+    byteorder = byteorder or sys.byteorder
+    if architectures is None:
+        architectures = []
+        try:
+            output = subprocess.check_output(['opkg', 'print-architecture'], stderr=subprocess.DEVNULL).decode()
+            for line in output.splitlines():
+                fields = line.split()
+                if len(fields) >= 3 and fields[0] == 'arch':
+                    architectures.append((fields[1], int(fields[2])))
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            pass
+    architectures = sorted(architectures, key=lambda item: item[1], reverse=True)
+    if machine in ('aarch64', 'arm64'):
+        cpu = 'arm' if bits == 32 else 'aarch64'
+    elif machine.startswith('arm'):
+        cpu = 'arm'
+    elif machine.startswith('mips'):
+        cpu = 'mipsel' if byteorder == 'little' and bits == 32 else 'unsupported-mips'
+    else:
+        cpu = machine
+    native = [name for name, priority in architectures if name not in ('all', 'noarch', 'any')]
+    return dict(image=distro, image_version=image.get('version', release.get('version_id', 'unknown')),
+                model=image.get('machine', 'unknown'), machine=machine, bits=bits, byteorder=byteorder,
+                cpu=cpu, python=python_version or '%d.%d' % sys.version_info[:2],
+                architectures=[name for name, priority in architectures],
+                package_arch=native[0] if native else cpu, package_manager='opkg')
+
+
+def control_from_ipk(path):
+    with open(path, 'rb') as stream:
+        if stream.read(8) != b'!<arch>\n':
+            raise ValueError('Not an IPK ar archive')
+        for unused in range(30):
+            header = stream.read(60)
+            if not header:
+                break
+            if len(header) != 60 or header[58:60] != b'`\n':
+                raise ValueError('Malformed IPK archive')
+            size = int(header[48:58])
+            name = header[:16].decode('ascii').strip().rstrip('/')
+            if size < 0 or size > 100000000:
+                raise ValueError('IPK archive member too large')
+            if name.startswith('control.tar'):
+                payload = stream.read(size)
+                if len(payload) != size:
+                    raise ValueError('Incomplete IPK control archive')
+                with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+                    for member in archive:
+                        if member.name.lstrip('./') == 'control' and member.isfile() and member.size < 131072:
+                            text = archive.extractfile(member).read().decode('utf-8', 'replace')
+                            return dict((key.lower(), value.strip()) for key, value in
+                                        (line.split(':', 1) for line in text.splitlines() if ':' in line and not line.startswith(' ')))
+                break
+            stream.seek(size + size % 2, 1)
+    raise ValueError('IPK control metadata missing')
+
+
+def validate_ipk(path, profile, expected='', source_name=''):
+    control = control_from_ipk(path)
+    if expected and control.get('package') != expected:
+        raise ValueError('Downloaded package name does not match expected plugin')
+    arch = control.get('architecture', '')
+    allowed = set(profile.get('architectures', [])) | {'all', 'noarch', 'any'}
+    if arch not in allowed:
+        raise ValueError('Package architecture %s is not supported by this receiver' % arch)
+    tagged = re.search(r'(?:py|python)(3\.\d+)', source_name)
+    if tagged and tagged.group(1) != profile['python']:
+        raise ValueError('Package Python version does not match this image')
+    return control
+
+
+def validate_binary(path, profile):
+    with open(path, 'rb') as stream:
+        header = stream.read(20)
+    if len(header) != 20 or header[:4] != b'\x7fELF':
+        raise ValueError('Cam executable is missing or is not an ELF binary')
+    bits = {1: 32, 2: 64}.get(header[4])
+    endian = {1: 'little', 2: 'big'}.get(header[5])
+    machine = int.from_bytes(header[18:20], endian or 'little')
+    expected = {'arm': 40, 'aarch64': 183, 'mipsel': 8}.get(profile['cpu'])
+    if not expected or machine != expected or bits != profile['bits'] or endian != profile['byteorder']:
+        raise ValueError('Cam executable does not match the receiver userspace architecture')
+    if not os.access(path, os.X_OK):
+        raise ValueError('Cam executable is not executable')
+    return True
+
+
+def make_tar(files):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+        for name, content in sorted(files.items()):
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            info.mode = 0o755 if name.endswith('.sh') else 0o644
+            info.mtime = 0
+            archive.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+def make_source_ipk(path, key, output, installed=()):
+    if key not in ('xstreamity', 'dreamexplorer'):
+        raise ValueError('Unknown source fallback')
+    folder = 'XStreamity' if key == 'xstreamity' else 'DreamExplorer'
+    destination = 'usr/lib/enigma2/python/Plugins/Extensions/' + folder + '/'
+    converters = {'usr/lib/enigma2/python/Components/Converter/XStreamityServiceInfo.py',
+                  'usr/lib/enigma2/python/Components/Converter/XStreamityServicePosition.py',
+                  'usr/lib/enigma2/python/Components/Renderer/XStreamityRunningText.py'}
+    files = {}
+    version = '0+apanel.' + time.strftime('%Y%m%d')
+    total = 0
+    with zipfile.ZipFile(path) as archive:
+        for info in archive.infolist():
+            if info.is_dir() or '/' not in info.filename:
+                continue
+            root, relative = info.filename.split('/', 1)
+            if not root.startswith(folder + '-'):
+                raise ValueError('Unexpected source repository root')
+            if key == 'xstreamity' and relative == 'CONTROL/control':
+                text = archive.read(info).decode('utf-8')
+                match = re.search(r'(?m)^Version:\s*([0-9][A-Za-z0-9.+:~_-]*)\s*$', text)
+                if not match:
+                    raise ValueError('Upstream package version is missing')
+                version = match.group(1)
+                continue
+            if key == 'xstreamity':
+                target = relative[len('XStreamity/'):] if relative.startswith('XStreamity/') else ''
+                keep = target.startswith(destination) or target in converters
+                if target.startswith('usr/lib/enigma2/python/Components/') and target not in converters:
+                    raise ValueError('Upstream shared components changed; this source fallback needs review')
+            else:
+                prefix = 'src/DreamExplorer/'
+                target = destination + relative[len(prefix):] if relative.startswith(prefix) else ''
+                keep = target.startswith(destination)
+            if not keep or '/locale/' in target and not target.endswith('.mo'):
+                continue
+            if '..' in target.split('/') or '\\' in target or stat.S_ISLNK(info.external_attr >> 16):
+                raise ValueError('Unsafe source archive path')
+            if target.endswith(('.pyc', '.pyo', '.so')):
+                raise ValueError('Source fallback contains compiled binaries')
+            total += info.file_size
+            if info.file_size > 8000000 or total > 64000000:
+                raise ValueError('Source archive exceeds size limit')
+            content = archive.read(info)
+            if target.endswith('.py'):
+                compile(content, target, 'exec')
+            files[target] = content
+    if destination + 'plugin.py' not in files or destination + '__init__.py' not in files:
+        raise ValueError('Source fallback is incomplete')
+    if key == 'xstreamity' and not converters.issubset(files):
+        raise ValueError('XStreamity shared components are missing')
+    dependencies = ['enigma2'] + [name for name in ('python3-core', 'python3-requests', 'python3-six',
+                    'python3-multiprocessing', 'python3-pillow', 'python3-twisted-core', 'python3-twisted-web')
+                    if name in installed]
+    package = 'enigma2-plugin-extensions-' + key
+    control = ('Package: %s\nVersion: %s\nArchitecture: all\nSection: extra\nPriority: optional\n'
+               'Maintainer: APanel source fallback\nDescription: %s packaged from upstream source\n'
+               'Depends: %s\nSource: https://github.com/%s\n') % (
+                   package, version, folder, ', '.join(dependencies),
+                   'kiddac/XStreamity' if key == 'xstreamity' else 'oe-alliance-plugins/DreamExplorer')
+    members = [('debian-binary', b'2.0\n'), ('control.tar.gz', make_tar({'control': control.encode()})),
+               ('data.tar.gz', make_tar(files))]
+    with open(output, 'wb') as stream:
+        stream.write(b'!<arch>\n')
+        for name, content in members:
+            header = ('%-16s%-12s%-6s%-6s%-8s%-10s`\n' % (name+'/', '0', '0', '0', '100644', len(content))).encode('ascii')
+            if len(header) != 60:
+                raise ValueError('Invalid package header')
+            stream.write(header)
+            stream.write(content)
+            if len(content) % 2:
+                stream.write(b'\n')
+    return package
+
+
+def main(args):
+    if args[0] == 'detect':
+        profile = collect_profile()
+        target = args[1]
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        temporary = target + '.tmp.' + str(os.getpid())
+        with open(temporary, 'w') as stream:
+            json.dump(profile, stream)
+        os.replace(temporary, target)
+        fields = [profile[k] for k in ('image', 'image_version', 'python', 'machine', 'bits', 'cpu', 'package_arch')]
+        print('|'.join(str(value).replace('|', '').replace('\n', '') for value in fields))
+    elif args[0] == 'validate-ipk':
+        with open(args[2]) as stream:
+            profile = json.load(stream)
+        control = validate_ipk(args[1], profile, args[3], args[4] if len(args) > 4 else '')
+        print('Package verified: %s (%s)' % (control['package'], control['architecture']))
+    elif args[0] == 'release-tag':
+        with open(args[1]) as stream:
+            tag = json.load(stream).get('tag_name', '')
+        if not re.fullmatch(r'[0-9][A-Za-z0-9._-]{1,60}', tag):
+            raise ValueError('Invalid upstream release tag')
+        print(tag)
+    elif args[0] == 'validate-binary':
+        with open(args[2]) as stream:
+            profile = json.load(stream)
+        validate_binary(args[1], profile)
+    elif args[0] == 'build-source':
+        output = subprocess.check_output(['opkg', 'list-installed']).decode('utf-8', 'replace')
+        installed = {line.split()[0] for line in output.splitlines() if line.strip()}
+        make_source_ipk(args[1], args[2], args[3], installed)
+    else:
+        raise ValueError('Unknown platform operation')
+
+
+if __name__ == '__main__':
+    try:
+        main(sys.argv[1:])
+    except Exception as error:
+        print('Compatibility check: %s' % error, file=sys.stderr)
+        sys.exit(2)
+APANEL_PLATFORM_PY
+}
+
+platform_tool() { platform_code | python3 - "$@"; }
+
+detect_platform() {
+    PLATFORM_LINE=$(platform_tool detect "$APANEL_PROFILE") || return 2
+    IFS='|' read -r APANEL_IMAGE APANEL_IMAGE_VERSION APANEL_PY APANEL_MACHINE APANEL_BITS APANEL_CPU APANEL_PACKAGE_ARCH <<APANEL_PROFILE_FIELDS
+$PLATFORM_LINE
+APANEL_PROFILE_FIELDS
+    export APANEL_PROFILE APANEL_IMAGE APANEL_PY APANEL_MACHINE APANEL_BITS APANEL_CPU
+    say "Receiver: $APANEL_IMAGE $APANEL_IMAGE_VERSION | Python $APANEL_PY | kernel $APANEL_MACHINE | userspace $APANEL_CPU/$APANEL_BITS | opkg $APANEL_PACKAGE_ARCH"
+}
+
+refresh_image_feed() {
+    APANEL_FEED_OK=0
+    FEED_LOG=$(mktemp /tmp/apanel-feed-update.XXXXXX) || return 1
+    opkg update > "$FEED_LOG" 2>&1
+    FEED_RC=$?
+    cat "$FEED_LOG"
+    if [ "$FEED_RC" -eq 0 ] && ! grep -Eiq 'Collected errors|Failed to download|wget returned|Signature check failed' "$FEED_LOG"; then
+        APANEL_FEED_OK=1
+    fi
+    rm -f "$FEED_LOG"
+    if [ "$APANEL_FEED_OK" != 1 ]; then
+        say 'Image feed refresh was incomplete; feed-dependent plugins will be skipped, not replaced using another image feed.'
+        return 2
+    fi
+}
+
+feed_pkg_available() {
+    [ "${APANEL_FEED_OK:-1}" = 1 ] || return 3
+    FEED_LIST=$(mktemp /tmp/apanel-feed-list.XXXXXX) || return 3
+    if ! opkg list "$1" > "$FEED_LIST" 2>/dev/null; then
+        rm -f "$FEED_LIST"
+        return 3
+    fi
+    awk -v package="$1" '$1==package {found=1} END {exit !found}' "$FEED_LIST"
+    FEED_FOUND=$?
+    rm -f "$FEED_LIST"
+    return "$FEED_FOUND"
+}
+
+install_feed_pkg() {
+    if feed_pkg_available "$1"; then
+        say "Source: $APANEL_IMAGE image feed ($1)"
+        opkg install "$1" || return 1
+        pkg_installed "$1"
+    else
+        say "Package unavailable or image feed could not be verified: $1"
+        return 2
+    fi
+}
+
+ensure_python_module() {
+    MOD_NAME=$1
+    shift
+    python3 -c "import importlib; importlib.import_module('$MOD_NAME')" >/dev/null 2>&1 && return 0
+    for MOD_PACKAGE in "$@"; do
+        if feed_pkg_available "$MOD_PACKAGE"; then
+            opkg install "$MOD_PACKAGE" || return 1
+            python3 -c "import importlib; importlib.import_module('$MOD_NAME')" >/dev/null 2>&1 && return 0
+            return 2
+        fi
+    done
+    say "Source fallback skipped: Python module $MOD_NAME is unavailable in this image."
+    return 2
+}
+
+install_source_plugin() (
+    SRC_KEY=$1
+    SRC_PACKAGE=enigma2-plugin-extensions-$SRC_KEY
+    SRC_DIR=$(mktemp -d /tmp/apanel-source.XXXXXX) || exit 1
+    trap 'rm -rf "$SRC_DIR"' 0
+    trap 'exit 1' HUP INT TERM
+    python3 -c 'import sys; sys.exit(sys.version_info < (3,9))' || exit 2
+    case "$SRC_KEY" in
+        xstreamity)
+            ensure_python_module requests python3-requests || exit $?
+            ensure_python_module six python3-six || exit $?
+            ensure_python_module multiprocessing.pool python3-multiprocessing || exit $?
+            ensure_python_module PIL.Image python3-pillow python3-imaging || exit $?
+            ensure_python_module twisted.web.client python3-twisted-web || exit $?
+            wget -q -T 30 -t 2 -O "$SRC_DIR/release.json" https://api.github.com/repos/kiddac/XStreamity/releases/latest || exit 1
+            SRC_TAG=$(platform_tool release-tag "$SRC_DIR/release.json") || exit 2
+            SRC_URL="https://codeload.github.com/kiddac/XStreamity/zip/refs/tags/$SRC_TAG"
+            ;;
+        dreamexplorer)
+            SRC_URL=https://codeload.github.com/oe-alliance-plugins/DreamExplorer/zip/refs/heads/main
+            ;;
+        *) exit 2 ;;
+    esac
+    say "Source: upstream Python source fallback for $SRC_KEY ($APANEL_IMAGE / Python $APANEL_PY)"
+    wget -q -T 60 -t 2 -O "$SRC_DIR/source.zip" "$SRC_URL" || exit 1
+    platform_tool build-source "$SRC_DIR/source.zip" "$SRC_KEY" "$SRC_DIR/plugin.ipk" || exit 2
+    platform_tool validate-ipk "$SRC_DIR/plugin.ipk" "$APANEL_PROFILE" "$SRC_PACKAGE" || exit 2
+    opkg install "$SRC_DIR/plugin.ipk" || exit 1
+    pkg_installed "$SRC_PACKAGE"
+)
+
+install_portable_feed_plugin() {
+    if feed_pkg_available "enigma2-plugin-extensions-$1"; then
+        install_feed_pkg "enigma2-plugin-extensions-$1"
+    else
+        FEED_STATE=$?
+        if [ "$FEED_STATE" -ne 1 ]; then
+            say 'Feed unavailable; no external source substitution was attempted.'
+            return 2
+        fi
+        install_source_plugin "$1"
+    fi
+}
+
+install_ipaudio() {
+    command -v ffmpeg >/dev/null 2>&1 || install_feed_pkg ffmpeg || return $?
+    PRO_MAJOR=$(ffmpeg -version 2>/dev/null | awk 'NR==1 {split($3,a,"."); print a[1]}')
+    case "$APANEL_PY:$PRO_MAJOR" in
+        3.12:7) PRO_FF=7.1 ;;
+        3.13:8|3.14:8) PRO_FF=8.0 ;;
+        *) say "IPAudio Pro skipped: no verified build for Python $APANEL_PY / FFmpeg $PRO_MAJOR."; return 2 ;;
+    esac
+    PRO_DIR=$APANEL_CPU
+    case "$APANEL_CPU" in
+        aarch64) PRO_ARCH=aarch64 ;;
+        mipsel) PRO_ARCH=mips32el ;;
+        arm)
+            PRO_ARCH=$(opkg print-architecture | sort -k3,3nr | awk '$2=="cortexa15hf-neon-vfpv4" || $2=="cortexa9hf-neon" || $2=="cortexa7hf-vfp" || $2=="armv7ahf-neon" {print $2; exit}')
+            [ -n "$PRO_ARCH" ] || { say 'IPAudio Pro: no matching ARM build.'; return 2; } ;;
+        *) say 'IPAudio Pro: unsupported userspace architecture.'; return 2 ;;
+    esac
+    PRO_META=$(mktemp /tmp/apanel-ipaudio-meta.XXXXXX) || return 1
+    if ! wget -q -T 30 -t 2 -O "$PRO_META" https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh; then
+        rm -f "$PRO_META"; return 1
+    fi
+    PRO_VER=$(sed -n 's/^VERSION=\([0-9][0-9.]*\).*$/\1/p' "$PRO_META" | head -n 1)
+    rm -f "$PRO_META"
+    case "$PRO_VER" in ''|*[!0-9.]*|.*|*..*|*.) return 2 ;; esac
+    PRO_FILE="enigma2-plugin-extensions-ipaudiopro_${PRO_VER}_${PRO_ARCH}_py${APANEL_PY}_ff${PRO_FF}.ipk"
+    PRO_IPK=/tmp/apanel-ipaudio-$$.ipk
+    PRO_URL="https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/v${PRO_VER}/python${APANEL_PY}/${PRO_DIR}/${PRO_FILE}"
+    if ! wget -q -T 30 -t 2 -O "$PRO_IPK" "$PRO_URL"; then
+        rm -f "$PRO_IPK"; say 'IPAudio Pro: matching published build could not be downloaded.'; return 2
+    fi
+    if ! platform_tool validate-ipk "$PRO_IPK" "$APANEL_PROFILE" enigma2-plugin-extensions-ipaudiopro "$PRO_FILE"; then
+        rm -f "$PRO_IPK"; return 2
+    fi
+    opkg install "$PRO_IPK"
+    PRO_RC=$?
+    rm -f "$PRO_IPK"
+    [ "$PRO_RC" -eq 0 ] || return "$PRO_RC"
+    pkg_installed enigma2-plugin-extensions-ipaudiopro
+}
+
+install_aglare() {
+    if [ "$APANEL_IMAGE" != openatv ]; then
+        say "Aglare ATV skipped: this skin is specific to OpenATV; detected $APANEL_IMAGE."
+        return 2
+    fi
+    remote https://raw.githubusercontent.com/popking159/skins/refs/heads/main/aglareatv/installer.sh
+}
+
+install_ncam() {
+    case "$APANEL_CPU" in arm|aarch64|mipsel) : ;; *) say 'NCam: unsupported userspace architecture.'; return 2 ;; esac
+    NCAM_META=$(mktemp /tmp/apanel-ncam-meta.XXXXXX) || return 1
+    NCAM_BASE=https://raw.githubusercontent.com/biko-73/Ncam_EMU/main
+    if ! wget -q -T 30 -t 2 -O "$NCAM_META" "$NCAM_BASE/installer.sh"; then rm -f "$NCAM_META"; return 1; fi
+    NCAM_FILE=$(sed -n 's/^MY_IPK="\(enigma2-plugin-softcams-ncam_[A-Za-z0-9._-]*_all.ipk\)".*/\1/p' "$NCAM_META" | head -n 1)
+    rm -f "$NCAM_META"
+    [ -n "$NCAM_FILE" ] || return 2
+    NCAM_IPK=/tmp/apanel-ncam-$$.ipk
+    if ! wget -q -T 30 -t 2 -O "$NCAM_IPK" "$NCAM_BASE/$NCAM_FILE"; then rm -f "$NCAM_IPK"; return 1; fi
+    if ! platform_tool validate-ipk "$NCAM_IPK" "$APANEL_PROFILE" enigma2-plugin-softcams-ncam; then rm -f "$NCAM_IPK"; return 2; fi
+    opkg install "$NCAM_IPK"
+    NCAM_RC=$?
+    rm -f "$NCAM_IPK"
+    [ "$NCAM_RC" -eq 0 ] || return "$NCAM_RC"
+    pkg_installed enigma2-plugin-softcams-ncam
+}
+
+install_satelliweb() {
+    case "$APANEL_PY" in 3.12|3.13|3.14) : ;; *) say 'Satelliweb: no verified Python build.'; return 2 ;; esac
+    case "$APANEL_CPU" in
+        aarch64) SAT_ARCH=aarch64 ;;
+        mipsel) SAT_ARCH=mipsel ;;
+        arm)
+            opkg print-architecture | awk '$2=="cortexa15hf-neon-vfpv4" {found=1} END {exit !found}' || {
+                say 'Satelliweb: the published ARM build does not match this image architecture.'; return 2;
+            }
+            SAT_ARCH=cortexa15hf-neon-vfpv4 ;;
+        *) say 'Satelliweb: unsupported userspace architecture.'; return 2 ;;
+    esac
+    SAT_META=$(mktemp /tmp/apanel-satelliweb-meta.XXXXXX) || return 1
+    SAT_BASE=https://dreambox4u.com/dreamarabia/Satelliweb_e2
+    if ! wget -q -T 30 -t 2 -O "$SAT_META" "$SAT_BASE/install_satelliweb_test.sh"; then rm -f "$SAT_META"; return 1; fi
+    SAT_VER=$(sed -n 's/^PLUGIN_VER="\([A-Za-z0-9._-]*\)".*/\1/p' "$SAT_META" | head -n 1)
+    rm -f "$SAT_META"
+    [ -n "$SAT_VER" ] || return 2
+    SAT_FILE="enigma2-plugin-extensions-satelliweblivefeeds_${SAT_VER}_${SAT_ARCH}_py${APANEL_PY}.ipk"
+    SAT_IPK=/tmp/apanel-satelliweb-$$.ipk
+    if ! wget -q -T 30 -t 2 -O "$SAT_IPK" "$SAT_BASE/$SAT_FILE"; then
+        rm -f "$SAT_IPK"; say 'Satelliweb: matching published package could not be downloaded.'; return 2
+    fi
+    if ! platform_tool validate-ipk "$SAT_IPK" "$APANEL_PROFILE" enigma2-plugin-extensions-satelliweblivefeeds "$SAT_FILE"; then
+        rm -f "$SAT_IPK"; return 2
+    fi
+    opkg install --force-reinstall "$SAT_IPK"
+    SAT_RC=$?
+    rm -f "$SAT_IPK"
+    [ "$SAT_RC" -eq 0 ] || return "$SAT_RC"
+    pkg_installed enigma2-plugin-extensions-satelliweblivefeeds
+}
+
+oscam_usb_ready() {
+    pkg_installed libusb-1.0-0 || [ -f /usr/lib/libusb-1.0.so.0 ] || [ -f /lib/libusb-1.0.so.0 ]
+}
+
+oscam_pcsc_ready() {
+    pkg_installed pcscd || [ -x /usr/sbin/pcscd ] || [ -x /sbin/pcscd ]
+}
+
+oscam_curl_ready() { pkg_installed libcurl4; }
+
+prepare_oscam_requirement() {
+    OSCAM_TEST=$1
+    shift
+    "$OSCAM_TEST" && return 0
+    for OSCAM_DEP in "$@"; do
+        if feed_pkg_available "$OSCAM_DEP"; then
+            say "OSCam: preparing $OSCAM_DEP before the cam transaction."
+            opkg install "$OSCAM_DEP" || return 1
+            "$OSCAM_TEST" && return 0
+        fi
+    done
+    say "OSCam skipped: native dependencies could not be prepared ($*)."
+    return 2
+}
+
+install_levi() {
+    case "$APANEL_CPU" in arm|aarch64|mipsel) : ;; *) say 'OSCam: unsupported userspace architecture.'; return 2 ;; esac
+    # The published postinst may kill opkg if these dependencies are missing.
+    # Resolve them synchronously before opening the cam package transaction.
+    prepare_oscam_requirement oscam_usb_ready libusb-1.0-0 libusb1 libusb-1.0 libusb || return $?
+    prepare_oscam_requirement oscam_pcsc_ready pcscd pcsc-lite || return $?
+    prepare_oscam_requirement oscam_curl_ready libcurl4 || return $?
+    OSCAM_PACKAGE=enigma2-plugin-softcams-oscam-emu-pcsc-levi45
+    OSCAM_IPK=/tmp/apanel-levi-$$.ipk
+    OSCAM_URL=https://raw.githubusercontent.com/levi-45/Levi45Emulator/main/enigma2-plugin-softcams-oscam-emu-pcsc-levi45_11968-803_all.ipk
+    if ! wget -q -T 30 -t 2 -O "$OSCAM_IPK" "$OSCAM_URL"; then rm -f "$OSCAM_IPK"; return 1; fi
+    if ! platform_tool validate-ipk "$OSCAM_IPK" "$APANEL_PROFILE" "$OSCAM_PACKAGE"; then rm -f "$OSCAM_IPK"; return 2; fi
+    opkg install --force-overwrite "$OSCAM_IPK"
+    OSCAM_RC=$?
+    rm -f "$OSCAM_IPK"
+    say "OSCam package-manager exit status: $OSCAM_RC"
+    if platform_tool validate-binary /usr/bin/OSCam_11968-803 "$APANEL_PROFILE"; then
+        if [ "$OSCAM_RC" -eq 0 ] && pkg_installed "$OSCAM_PACKAGE"; then
+            say 'OSCam installed: registered package and matching executable verified.'
+            return 0
+        fi
+        say 'OSCam executable detected; package configuration needs review (CHECK, not a missing cam).'
+        return 2
+    fi
+    [ "$OSCAM_RC" -eq 0 ] && return 2
+    return 1
+}
+
 count_words() {
     set -- $1
     echo $#
@@ -198,86 +781,16 @@ install_transmission_bundle() {
     return 0
 }
 
-install_xstreamity() {
-    opkg list | awk '$1=="enigma2-plugin-extensions-xstreamity" {f=1} END {exit !f}' || return 1
-    opkg install enigma2-plugin-extensions-xstreamity || return 1
-    pkg_installed enigma2-plugin-extensions-xstreamity
-}
+install_xstreamity() { install_portable_feed_plugin xstreamity; }
 
 install_epggrabber() {
     remote https://raw.githubusercontent.com/zKhadiri/Epg-plugin/master/Download/installer.sh || return 1
     [ -d /usr/lib/enigma2/python/Plugins/Extensions/EPGGrabber ]
 }
 
-install_ncam() {
-    remote https://raw.githubusercontent.com/biko-73/Ncam_EMU/main/installer.sh || return 1
-    opkg list-installed | grep -q '^enigma2-plugin-softcams-ncam '
-}
 
-install_ipaudio() {
-    command -v ffmpeg >/dev/null 2>&1 || opkg install ffmpeg || return 1
-    MAJOR=$(ffmpeg -version 2>/dev/null | awk 'NR==1 {split($3,a,"."); print a[1]}')
-    case "$MAJOR" in
-        7|8)
-            remote https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh
-            return $?
-            ;;
-        9)
-            say 'FFmpeg 9: using upstream FFmpeg 8 build; runtime compatibility not guaranteed'
-            ;;
-        *)
-            say "Unsupported FFmpeg $MAJOR"
-            return 1
-            ;;
-    esac
-    PY=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])') || return 1
-    case "$PY" in
-        3.12) FF=7.1 ;;
-        3.13|3.14) FF=8.0 ;;
-        *) return 1 ;;
-    esac
-    case "$(uname -m)" in
-        aarch64)
-            DIR=aarch64
-            ARCH=aarch64
-            ;;
-        *mips*)
-            DIR=mipsel
-            ARCH=mips32el
-            ;;
-        arm*)
-            DIR=arm
-            ARCH=''
-            for A in cortexa15hf-neon-vfpv4 cortexa9hf-neon cortexa7hf-vfp armv7ahf-neon; do
-                if opkg print-architecture 2>/dev/null | grep -q " $A " || ls /etc/opkg 2>/dev/null | grep -q "$A"; then
-                    ARCH=$A
-                    break
-                fi
-            done
-            [ -n "$ARCH" ] || return 1
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-    META=/tmp/apanel-ipaudio-meta-$$.sh
-    wget -qO "$META" https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/installer.sh || return 1
-    VER=$(sed -n 's/^VERSION=\([0-9][0-9.]*\).*$/\1/p' "$META" | head -n 1)
-    rm -f "$META"
-    [ -n "$VER" ] || return 1
-    PKG="enigma2-plugin-extensions-ipaudiopro_${VER}_${ARCH}_py${PY}_ff${FF}.ipk"
-    URL="https://raw.githubusercontent.com/zKhadiri/IPAudioPro-Releases-/main/v${VER}/python${PY}/${DIR}/${PKG}"
-    IPK=/tmp/apanel-ipaudio-$$.ipk
-    if ! wget -qO "$IPK" "$URL" || [ ! -s "$IPK" ]; then
-        rm -f "$IPK"
-        return 1
-    fi
-    opkg install "$IPK"
-    RC=$?
-    rm -f "$IPK"
-    [ "$RC" -eq 0 ] || return "$RC"
-    opkg list-installed | grep -q '^enigma2-plugin-extensions-ipaudiopro '
-}
+
+
 
 
 # IPAudio Plus upstream installer restarts/kills Enigma2 inside its shell.
@@ -327,8 +840,12 @@ install_ipaudioplus() {
         rm -f "$PLUS_IPK"
         return 1
     fi
-    # Match the published upstream opkg flags, without its GUI restart.
-    opkg install --nodeps --force-reinstall --force-overwrite "$PLUS_IPK"
+    if ! platform_tool validate-ipk "$PLUS_IPK" "$APANEL_PROFILE" enigma2-plugin-extensions-ipaudioplus "$PLUS_FILE"; then
+        rm -f "$PLUS_IPK"
+        return 2
+    fi
+    # Keep dependency verification enabled on the actual receiver image.
+    opkg install --force-reinstall --force-overwrite "$PLUS_IPK"
     PLUS_RC=$?
     rm -f "$PLUS_IPK"
     [ "$PLUS_RC" -eq 0 ] || return 1
@@ -340,25 +857,7 @@ install_ipaudioplus() {
     return 0
 }
 
-install_levi() {
-    URL=https://raw.githubusercontent.com/levi-45/Levi45Emulator/main/enigma2-plugin-softcams-oscam-emu-pcsc-levi45_11968-803_all.ipk
-    IPK=/tmp/apanel-levi-$$.ipk
-    if ! wget -qO "$IPK" "$URL" || [ ! -s "$IPK" ]; then
-        rm -f "$IPK"
-        return 1
-    fi
-    opkg install --force-overwrite "$IPK"
-    RC=$?
-    rm -f "$IPK"
-    say "Levi45 opkg exit status: $RC"
-    INSTALLED=$(opkg list-installed | grep -Ei '^enigma2-plugin[^ ]*oscam[^ ]*levi[^ ]* - ' | head -n 1)
-    if [ -n "$INSTALLED" ]; then
-        [ "$RC" -eq 0 ] && return 0
-        return 2
-    fi
-    [ -x /usr/bin/OSCam_11968-803 ] && return 2
-    return 1
-}
+
 
 install_audioshift() {
     remote https://xfayez95.github.io/audioshift/installer.sh --no-restart
@@ -386,24 +885,11 @@ install_movies_ostende() {
     return "$RC"
 }
 
-feed_pkg_available() {
-    opkg list "$1" 2>/dev/null | awk -v package="$1" '$1==package {found=1} END {exit !found}'
-}
 
-install_feed_pkg() {
-    FEED_PACKAGE=$1
-    if ! feed_pkg_available "$FEED_PACKAGE"; then
-        say "Package not available in this image feed: $FEED_PACKAGE"
-        return 1
-    fi
-    opkg install "$FEED_PACKAGE" || return 1
-    pkg_installed "$FEED_PACKAGE"
-}
 
-install_satelliweb() {
-    remote http://dreambox4u.com/dreamarabia/Satelliweb_e2/install_satelliweb_test.sh || return 1
-    pkg_installed enigma2-plugin-extensions-satelliweblivefeeds
-}
+
+
+
 
 install_footonsat() {
     remote https://raw.githubusercontent.com/fairbird/FootOnsat/main/Download/install.sh || return 1
@@ -417,6 +903,9 @@ install_chocholousek() {
     if feed_pkg_available "$PICON_PACKAGE"; then
         install_feed_pkg "$PICON_PACKAGE"
         return $?
+    else
+        FEED_STATE=$?
+        [ "$FEED_STATE" -eq 1 ] || { say 'Image feed unavailable; source fallback was not attempted.'; return 2; }
     fi
     # The upstream shell clears settings and restarts the GUI. Install its IPK directly.
     PICON_BASE=https://raw.githubusercontent.com/s3n0/e2plugins/master/ChocholousekPicons
@@ -439,6 +928,9 @@ install_chocholousek() {
         rm -f "$PICON_IPK"
         return 1
     fi
+    if ! platform_tool validate-ipk "$PICON_IPK" "$APANEL_PROFILE" "$PICON_PACKAGE"; then
+        rm -f "$PICON_IPK"; return 2
+    fi
     opkg install "$PICON_IPK"
     PICON_RC=$?
     rm -f "$PICON_IPK"
@@ -449,6 +941,9 @@ install_cacheflush() {
     if feed_pkg_available enigma2-plugin-extensions-cacheflush; then
         install_feed_pkg enigma2-plugin-extensions-cacheflush
         return $?
+    else
+        FEED_STATE=$?
+        [ "$FEED_STATE" -eq 1 ] || { say 'Image feed unavailable; source fallback was not attempted.'; return 2; }
     fi
     CACHE_ZIP=/tmp/apanel-cacheflush-$$.zip
     if ! wget -q -T 30 -t 2 -O "$CACHE_ZIP" https://codeload.github.com/oe-alliance-plugins/CacheFlush/zip/refs/heads/main; then
@@ -552,7 +1047,7 @@ install_plugin_key() {
         customcs)
             remote https://raw.githubusercontent.com/popking159/customchannelselection/refs/heads/main/myinstaller.sh ;;
         aglare)
-            remote https://raw.githubusercontent.com/popking159/skins/refs/heads/main/aglareatv/installer.sh ;;
+            install_aglare ;;
         livefeed)
             remote https://live-feed.net/enigma2/installer.sh --no-restart ;;
         epggrabber)
@@ -574,7 +1069,7 @@ install_plugin_key() {
         satelliweb) install_satelliweb ;;
         footonsat) install_footonsat ;;
         cacheflush) install_cacheflush ;;
-        dreamexplorer) install_feed_pkg enigma2-plugin-extensions-dreamexplorer ;;
+        dreamexplorer) install_portable_feed_plugin dreamexplorer ;;
         chocholousek) install_chocholousek ;;
         *)
             return 1 ;;
@@ -913,6 +1408,11 @@ run_mode() {
     fi
 
     if [ "$MODE" = install ]; then
+        if ! detect_platform; then
+            report 'CHECK: receiver compatibility profile could not be collected; installation was not started.'
+            rm -f "$PIDFILE"
+            return 2
+        fi
         if ! begin_restart_guard; then
             end_restart_guard
             report 'FAILED: restart deferral could not be prepared; installation not started.'
@@ -920,7 +1420,7 @@ run_mode() {
             return 1
         fi
         report "A Panel $VERSION | Install mode | $TOTAL steps"
-        step 'Update OpenATV feed' opkg update
+        step "Refresh $APANEL_IMAGE image feed" refresh_image_feed
         # Display order is alphabetic; install order is deliberate.
         # AJ Panel is first. MixAudio, NCam and OSCam are the last three.
         # Child installer restart commands are deferred until the final reboot.
@@ -980,7 +1480,7 @@ plugin_name() {
         aglare) echo 'Aglare Skin' ;;
         livefeed) echo 'LiveFeed' ;;
         epggrabber) echo 'EPG Grabber' ;;
-        xstreamity) echo 'XStreamity (OpenATV feed)' ;;
+        xstreamity) echo 'XStreamity' ;;
         mixaudio) echo 'MixAudio' ;;
         ncam) echo 'NCam' ;;
         oscamlevi) echo 'OSCam' ;;
@@ -1009,7 +1509,7 @@ if [ "${1:-}" = '--run-remove' ]; then
 fi
 
 if [ "$(id -u)" -ne 0 ] || ! command -v opkg >/dev/null 2>&1; then
-    say 'ERROR: Root and OpenATV/opkg required'
+    say 'ERROR: A root Enigma2 image with opkg is required'
     exit 1
 fi
 
@@ -1017,6 +1517,12 @@ if ! command -v python3 >/dev/null 2>&1; then
     say 'ERROR: Python3 required'
     exit 1
 fi
+
+python3 -c 'import sys; sys.exit(sys.version_info < (3,9))' || {
+    say 'ERROR: This panel requires a Python 3.9+ Enigma2 image.'
+    exit 1
+}
+detect_platform || exit 1
 
 # Open the menu without restarting an already loaded GUI.
 if [ -r "$READY" ]; then
@@ -37654,11 +38160,12 @@ if [ "$?" -ne 0 ]; then
 fi
 
 cat > "$PLUG/plugin.py" <<'PY'
-# A Panel v0.4.21 — OpenATV / Enigma2
+# A Panel v0.4.22 — Enigma2 / opkg
 from __future__ import absolute_import
 
 import os
 import re
+import json
 import subprocess
 
 from enigma import ePoint, eTimer, getDesktop
@@ -37671,9 +38178,9 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-VERSION = 'v0.4.21'
+VERSION = 'v0.4.22'
 TITLE = 'A Panel'
-AUTHOR = 'Mr. Hamada Hawwas'
+AUTHOR = 'Mr. Hamdy Hawass'
 ROOT = '/usr/lib/enigma2/python/Plugins/Extensions/APanel'
 ASSETS = ROOT + '/assets'
 # Use a bundled regular face so category text is independent of bold skin fonts.
@@ -38010,12 +38517,22 @@ def simple_skin(title):
     return '\n'.join(s)
 
 
+def image_plugin_policy():
+    try:
+        with open('/home/root/apanel-platform.json') as stream:
+            image = json.load(stream).get('image', 'unknown')
+    except Exception:
+        image = 'unknown'
+    return {} if image == 'openatv' else {'aglare': 'Aglare ATV is available on OpenATV only.'}
+
+
 class GridPicker(Screen):
     def __init__(self, session, mode):
         Screen.__init__(self, session)
         self.skin = picker_skin()
         self.mode = mode
-        self.allowed = set(ALL_KEYS)
+        self.image_unavailable = image_plugin_policy()
+        self.allowed = set(ALL_KEYS) - set(self.image_unavailable)
         self.default_allowed = set(DEFAULT_SELECTION) & self.allowed
         self.checked = set()
         self.cursor = 0
@@ -38030,7 +38547,7 @@ class GridPicker(Screen):
         self.package_query_ok = False
         self._package_names = set()
         self['brandlogo'] = Pixmap()
-        self['author'] = Label('Mr. Hamada Hawwas')
+        self['author'] = Label(AUTHOR)
         self['selected_count'] = Label('')
         self['plugins_count'] = Label('')
         self['bar'] = Label('')
@@ -38091,6 +38608,8 @@ class GridPicker(Screen):
             else:
                 self.states[key] = 'Needs Verification'
                 self.evidence[key] = 'Unable to verify'
+            if key in getattr(self, 'image_unavailable', {}) and self.states[key] != 'Installed':
+                self.evidence[key] = self.image_unavailable[key]
 
     def on_ready(self):
         for key, filename in (('trashicon','controls/trash.png'),('brandlogo','plugin.png')):
@@ -38243,6 +38762,8 @@ class GridPicker(Screen):
         if self.mode=='install' and key == 'audioshift' and not is_one() and key not in self.checked:
             self.warn_audioshift()
         if self.mode=='install' and key not in self.allowed:
+            reason=getattr(self, 'image_unavailable', {}).get(key)
+            if reason:self.session.open(MessageBox, reason, MessageBox.TYPE_INFO, timeout=6)
             return
         if key in self.checked:self.checked.remove(key)
         else:self.checked.add(key)
@@ -38578,7 +39099,7 @@ def open_plugin(session,**kwargs):
 
 
 def Plugins(**kwargs):
-    return [PluginDescriptor(name='APanel',description='Mr. Hamada Hawwas',
+    return [PluginDescriptor(name='APanel',description='Mr. Hamdy Hawass',
             icon='plugin.png',where=PluginDescriptor.WHERE_PLUGINMENU,fnc=open_plugin),
             PluginDescriptor(where=PluginDescriptor.WHERE_SESSIONSTART,fnc=session_start)]
 
